@@ -3,14 +3,14 @@
   "version": "0.1.0",
   "description": "Portable autoresearch scouting and bounded optimization skills",
   "author": {
-    "name": "metinam"
+    "name": "Metimer"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "Autoresearch Toolkit",
     "shortDescription": "Scout benchmarks and run bounded experiments.",
     "longDescription": "Prepare measured baselines and optimize within an explicit scope and budget.",
-    "developerName": "metinam",
+    "developerName": "Metimer",
     "category": "Productivity",
     "capabilities": [],
     "defaultPrompt": ["Prepare an autoresearch baseline for this repository."]
