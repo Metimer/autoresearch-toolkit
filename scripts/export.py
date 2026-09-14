@@ -18,7 +18,6 @@ MANIFESTS = {
 # an unrelated file placed in a skill must never silently enter a release.
 PORTABLE_FILES = (
     "README.md",
-    "PROVENANCE.md",
     "LICENSE",
     "skills/autoresearch-scout/SKILL.md",
     "skills/autoresearch-scout/agents/openai.yaml",

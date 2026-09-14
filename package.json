@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "description": "Portable skills; original Pi engine archived separately",
+  "description": "Portable autoresearch scouting and bounded optimization skills",
   "keywords": [
     "pi-package"
   ],
@@ -15,7 +15,6 @@
   "files": [
     "skills",
     "README.md",
-    "PROVENANCE.md",
     "LICENSE"
   ]
 }

@@ -4,6 +4,11 @@ __pycache__/
 .DS_Store
 /dist/
 
+# Local audit reports, including dated variants.
+[Aa][Uu][Dd][Ii][Tt]*.md
+[Pp][Rr][Oo][Vv][Ee][Nn][Aa][Nn][Cc][Ee]*.md
+[Vv][Aa][Ll][Ii][Dd][Aa][Tt][Ii][Oo][Nn]*.md
+
 # Local credentials; keep deliberately sanitized examples versionable.
 .env
 .env.*

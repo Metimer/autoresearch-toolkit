@@ -157,6 +157,7 @@ class ExportTests(unittest.TestCase):
                 ".env", ".env.production", ".auto/session.jsonl", ".npmrc",
                 "assets/private.key", "assets/customer-data.csv",
                 "scripts/credentials.json", "node_modules/private/index.js",
+                "AUDIT.md", "assets/PROVENANCE.md", "VALIDATION.md",
             )
             for name in private_files:
                 file = source / "skills/autoresearch-scout" / name
@@ -171,6 +172,28 @@ class ExportTests(unittest.TestCase):
                         self.assertEqual(files, {*exporter.PORTABLE_FILES, manifest})
                         self.assertTrue(all(b"SYNTHETIC_PRIVATE_SENTINEL" not in
                                             (target / name).read_bytes() for name in files))
+
+    def test_exports_do_not_require_or_ship_local_reports(self):
+        reports = ("AUDIT.md", "PROVENANCE.md", "VALIDATION.md")
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            source = self.fixture(base)
+            self.assertTrue(all(not (source / name).exists() for name in reports))
+            for present in (False, True):
+                if present:
+                    for name in reports:
+                        (source / name).write_text("LOCAL_REPORT_SENTINEL")
+                with patch.object(exporter, "ROOT", source):
+                    for agent in exporter.MANIFESTS:
+                        with self.subTest(agent=agent, reports_present=present):
+                            target = exporter.export(
+                                agent, base / str(present) / agent / "autoresearch-toolkit",
+                            )
+                            self.assertTrue(all(not (target / name).exists()
+                                                for name in reports))
+                            if agent == "pi":
+                                manifest = json.loads((target / "package.json").read_text())
+                                self.assertTrue(set(reports).isdisjoint(manifest["files"]))
 
     def test_symlinked_manifest_parent_rejected_before_output_creation(self):
         for agent in ("codex", "claude", "cursor"):
@@ -189,7 +212,7 @@ class ExportTests(unittest.TestCase):
 
     def test_symlinked_resources_and_ancestors_rejected(self):
         paths = (
-            "README.md", "PROVENANCE.md", "LICENSE", "skills",
+            "README.md", "LICENSE", "skills",
             "skills/autoresearch-scout", "skills/autoresearch-scout/scripts",
             "skills/autoresearch-scout/scripts/measure.py",
             *exporter.MANIFESTS.values(),
