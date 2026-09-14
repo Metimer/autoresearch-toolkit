@@ -1,6 +1,7 @@
 # Plan d’implémentation — Autoresearch Toolkit
 
-Statut : proposition d’architecture et de séquencement, avant implémentation.
+Statut : architecture Rust retenue ; première tranche des lots 0–1 implémentée.
+La boucle moteur et les lots suivants restent à réaliser ; voir `RUST_ENGINE.md`.
 Référence de départ : commit `130f305`, version du toolkit `0.1.0`.
 Responsable du projet et des nouvelles contributions : Metimer.
 
@@ -44,20 +45,29 @@ Les constats constituent une lecture ciblée, pas une certification du moteur ar
 
 ### Socle technique
 
-- Cœur en TypeScript strict, compilé en JavaScript ESM et déclarations de types.
-- Node.js 22 comme minimum de départ ; tester aussi Node.js 24. Fixer les versions
-  mineures et dépendances réellement utilisées au lot 1, puis les consigner dans
-  un lockfile unique.
-- Trois paquets locaux : `core`, `cli`, `adapter-pi`. La racine reste privée.
-  Les noms publiables seront vérifiés avant publication, sans réserver de nom
-  ni déclencher de téléchargement à l’exécution.
-- Tests TypeScript compilés, exécutés avec le runner Node ; tests Python conservés.
-- Cœur sans dépendance Pi, sans SDK LLM et sans serveur nécessaire. La validation
-  runtime des contrats est centralisée ; les types TypeScript seuls ne valident
-  jamais les entrées externes. JSON Schema documente le contrat, avec tests de parité
-  entre schéma et validation runtime.
+- Cœur et CLI en Rust, workspace Cargo avec `autoresearch-core` et
+  `autoresearch-cli`. Le binaire s’appelle `autoresearch`.
+- Édition Rust 2021 et minimum Rust 1.81 pour le démarrage, vérifié localement.
+  `Cargo.lock` est versionné ; la CI couvre ce minimum et Rust stable. L’augmentation
+  du minimum demande une décision explicite et une mise à jour de compatibilité.
+- Première tranche : Serde/serde_json pour les contrats, sans runtime asynchrone.
+  Le choix du runner synchrone ou asynchrone sera évalué au lot 4 sur les besoins
+  réels d’annulation et de drainage des sorties ; pas d’ajout implicite de dépendances.
+- Adaptateur Pi léger en TypeScript, dans `adapters/pi/`, communiquant avec le
+  binaire par requêtes et événements JSON versionnés. Aucun binding natif/FFI
+  nécessaire et aucune logique d’acceptation dupliquée dans cet adaptateur.
+- Les noms de crates publiables seront vérifiés au lot distribution ; `publish = false`
+  reste actif pendant le développement. Aucun téléchargement à l’exécution.
+- Tests Rust avec Cargo, tests Python conservés. Node 24 sert aux tests de
+  caractérisation de l’archive, puis à l’adaptateur ; le cœur fonctionne sans Node.
+- Validation Serde stricte puis sémantique, via un type validé sans mutation publique.
+  Les types Rust ne suffisent pas à vérifier des données externes. JSON Schema
+  et ses tests de parité restent à ajouter avant stabilisation des contrats.
 - Linux et macOS en première version ; WSL documenté. Windows natif reste hors
   du périmètre tant que la supervision de processus n’y est pas testée.
+- Binaires par OS/architecture, testés après fabrication, avec leurs notices de
+  dépendances. La compatibilité libc sur Linux et les architectures distribuées
+  seront explicites ; « binaire Rust » ne signifie pas automatiquement « statique ».
 
 ### Isolation
 
@@ -90,8 +100,10 @@ avec blocage du réseau ou des accès externes nécessite un backend isolé sép
 ## 4. Organisation cible
 
 ```text
-packages/
-  core/
+Cargo.toml
+Cargo.lock
+crates/
+  autoresearch-core/
     src/
       contracts/       # configurations, événements, résultats et erreurs
       session/         # transitions, budgets, orchestration
@@ -103,9 +115,10 @@ packages/
       decisions/       # acceptation, rejet, indécision
       history/         # index et recherche d’expériences
       reports/         # restitution et export des résultats
-  cli/
+  autoresearch-cli/
     src/               # commandes et présentation texte/JSON
-  adapter-pi/
+adapters/
+  pi/
     src/               # outils Pi, événements, vues
 schemas/               # contrats JSON publics versionnés
 skills/                # skills existants et intégration moteur
@@ -218,7 +231,9 @@ répertoire courant implicite de l’agent.
 Chaque exécution possède un groupe de processus POSIX, des sorties en streaming
 bornées et une séquence d’arrêt TERM puis KILL après un délai court. Il faut attendre
 la terminaison et traiter aussi les descendants qui gardent les sorties ouvertes.
-L’arrêt du seul parent ne suffit pas. [Documentation Node.js : child processes](https://nodejs.org/docs/latest-v22.x/api/child_process.html)
+L’arrêt du seul parent ne suffit pas. La destruction du handle Rust `Child`
+ne termine pas non plus le processus : attendre et arrêter les processus est
+une responsabilité explicite du superviseur. [Documentation Rust : Child](https://doc.rust-lang.org/std/process/struct.Child.html)
 
 Le coût de préparation, checks, hooks, warmups, mesures et re-mesures est imputé
 au budget. À la reprise, conserver la durée déjà consommée et l’échéance initiale.
@@ -294,7 +309,9 @@ usage/configuration, conflit d’état, prérequis indisponible, échec d’exé
 timeout/annulation et corruption. Une expérience rejetée est un résultat métier,
 pas une erreur de transport. Les commandes mutantes acceptent une clé d’idempotence.
 
-L’API du cœur expose les mêmes opérations sans dépendre de la CLI. Aucun appel
+L’API de la crate cœur expose les mêmes opérations sans dépendre de la CLI.
+Le protocole JSON de la CLI versionne les requêtes, erreurs et événements ;
+l’adaptateur Pi négocie les capacités et refuse une version incompatible. Aucun appel
 `log(status=keep, metric=...)` n’est exposé comme autorité d’acceptation.
 
 ## 10. Lots d’implémentation et critères de sortie
@@ -312,8 +329,9 @@ La liste de compatibilité historique est écrite avant le portage.
 
 ### Lot 1 — Poser les paquets et les contrats
 
-Dépendance : lot 0. Travaux : build TypeScript, lockfile, paquets core/cli/Pi,
-types et validateurs, codes d’erreur, schémas, importations publiques et CI minimale.
+Dépendance : lot 0. Travaux : workspace Cargo, lockfile, crates core/cli,
+contrats Serde et validateurs, codes d’erreur, schémas, API Rust publique, protocole
+JSON et CI minimale. L’adaptateur TypeScript sera ajouté au lot 9.
 
 Sortie : import du cœur sans Pi installé ; build reproductible ; entrées invalides
 refusées ; compilation et tests Python existants verts. Une commande de diagnostic
@@ -377,7 +395,7 @@ un autre état. Une interruption après décision mais avant projection se recon
 
 Dépendance : lot 6. Travaux : commandes publiques, JSON stable, aide, diagnostics,
 intégration du parcours moteur dans les deux skills et documentation des modes.
-Le mode portable actuel reste utilisable sans Node ; absence du moteur annoncée,
+Le mode portable actuel reste utilisable sans binaire Rust ; absence du moteur annoncée,
 sans téléchargement ni bascule silencieuse depuis une session moteur active.
 
 Sortie : un utilisateur teste un patch sans Pi ni LLM. Les skills distinguent
@@ -397,7 +415,8 @@ invalides ; aucune promesse de reprise des changements non committés sans snaps
 
 ### Lot 9 — Adaptateur Pi et hooks
 
-Dépendances : lots 7–8. Travaux : outils préfixés pour éviter les collisions avec
+Dépendances : lots 7–8. Travaux : adaptateur TypeScript utilisant la CLI Rust
+et son protocole JSON versionné ; outils préfixés pour éviter les collisions avec
 le moteur original, annulation et cycle de vie transmis au cœur, vues fondées sur
 ses événements. Garder l’auto-reprise désactivée par défaut ; une activation explicite
 reste soumise aux mêmes budgets et limites après reprise.
@@ -433,7 +452,8 @@ les exports. Le rapport distingue gains exploratoires et confirmation finale.
 
 ### Lot 11 — Distribution et qualification de version
 
-Dépendances : lots 0–10. Travaux : construire les artefacts compilés, inclure
+Dépendances : lots 0–10. Travaux : construire les binaires Rust Linux/macOS
+pour les architectures annoncées et le paquet adaptateur Pi, inclure
 licences et notices, adapter l’exporteur avec inventaires explicites par profil,
 tests depuis les paquets fabriqués, guide d’installation et matrice de compatibilité.
 
@@ -484,9 +504,11 @@ décisions sur données déterministes ; réserver les mesures de performance r�
 aux scénarios de qualification avec bruit enregistré. Tester les arrêts de processus
 avec de vrais processus, en complément des mocks.
 
-Matrice initiale proposée : Linux et macOS, Node.js 22 et 24 ; Python 3.10 et une
-version plus récente fixée en CI. WSL possède un smoke test documenté séparément.
-La version Pi testée et sa version minimale sont consignées avant release.
+Matrice initiale définie : Linux et macOS, Rust 1.81 et stable ; Python 3.10 et
+3.13 ; Node 24 dans un job de caractérisation séparé. Ces jobs doivent être
+exécutés à distance avant de prétendre à une compatibilité vérifiée. WSL aura un
+smoke test documenté séparément. L’adaptateur Pi aura sa matrice Node/Pi propre
+avec versions minimales consignées avant release.
 
 ## 12. Jalons, effort et ordre des commits
 
@@ -503,11 +525,12 @@ Certaines définitions de contrats, fixtures et vues peuvent être préparées e
 parallèle, mais leurs intégrations respectent les dépendances. Ce plan ne lance
 aucun travail délégué automatiquement.
 
-Ordre de grandeur indicatif pour A à D : 35–55 jours de travail d’une personne,
-incluant tests et corrections d’intégration, hors lot 12. À réestimer après les
-lots 0–1 : l’état des dépendances Pi, la fidélité des patches et la récupération
-de processus sont les principales sources d’incertitude. Ce n’est pas un engagement
-de calendrier ni une estimation de temps d’exécution d’un agent.
+L’estimation précédente de 35–55 jours concernait une extraction TypeScript ;
+elle est retirée pour la réimplémentation Rust. Réestimer A à D après stabilisation
+des contrats et un prototype du superviseur au lot 4. Le portage des comportements,
+le protocole Pi/CLI, la fidélité des patches, la récupération des processus et les
+binaires par plateforme sont les principaux facteurs d’effort. Aucun calendrier
+ferme n’est annoncé à ce stade.
 
 Prévoir un lot reviewable par capacité : caractérisation, contrats, journal,
 isolation, runner, mesure, décision, CLI, migration, Pi/hooks, historique/export,
@@ -548,5 +571,17 @@ La première version complète est prête lorsque :
 7. La version candidate contient documentation, versions compatibles, licences,
    attributions et notes de migration ; ses paquets sont testés après fabrication.
 
-Le premier travail d’implémentation sera le lot 0, puis les contrats du lot 1.
-Ce document prépare cette exécution ; il ne modifie pas encore le moteur.
+### Avancement de la première tranche Rust
+
+- Workspace Cargo, crates core/cli, lockfile et compatibilité Rust 1.81 en place.
+- Contrat initial strict, validateurs sémantiques et commande `validate` en lecture seule.
+- `doctor` décrit les capacités réellement présentes et recherche Git sur PATH.
+- Six tests de caractérisation du lecteur JSONL archivé et notice d’attribution.
+- Seize tests Rust initiaux ; les 23 tests Python existants restent verts.
+- Workflow CI défini ; exécution distante et autres plateformes encore à vérifier.
+
+Les lots 0–1 ne sont pas déclarés entièrement terminés : caractérisation des autres
+fonctions reprises, contrat complet, génération du schéma et parité restent à faire.
+Les commandes d’expérimentation de ce plan restent des interfaces cibles.
+Prochaine étape : compléter les contrats, puis le journal, les transitions et
+les budgets du lot 2. La boucle du moteur Rust n’est pas encore opérationnelle.

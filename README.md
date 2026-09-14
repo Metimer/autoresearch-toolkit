@@ -115,10 +115,44 @@ Resuming the loop requires a new invocation.
 
 ## Development
 
+### Rust engine
+
+An agent-independent Rust engine is under development. The first slice provides
+strict configuration validation and a diagnostic CLI. Experiment execution,
+persistence, isolation, and the Pi adapter are still planned. The portable skills
+above remain the available optimization workflow.
+
+From a full source checkout, with Rust 1.81 or later:
+
+```sh
+cargo build --workspace --locked
+./target/debug/autoresearch doctor --json
+./target/debug/autoresearch validate --config examples/session.json --json
+```
+
+The example contains placeholders. Validation checks structure and consistency;
+it does not verify the repository or execute the declared commands. The Rust
+binary runs without Node.js or a Pi installation. Building it may download the
+dependencies recorded in `Cargo.lock`.
+
+Development details are in `docs/RUST_ENGINE.md` in the source repository.
+The existing skill bundles do not include the Rust sources or binary.
+
+### Checks
+
 Run the tests from the repository root:
 
 ```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo test --workspace --locked
 python3 -m unittest discover -s tests -v
+```
+
+Characterization tests for the archived JSONL reader additionally require Node.js 24:
+
+```sh
+node --test tests/legacy/jsonl.test.mjs
 ```
 
 The suite covers measurements, failures, timeouts, and exports for all five
@@ -131,4 +165,4 @@ are neither loaded by the root manifests nor included in exports.
 ## License
 
 [MIT](LICENSE). Third-party components retained in `originals/` keep their
-respective licenses and attributions.
+respective licenses and attributions. See [third-party notices](THIRD_PARTY_NOTICES.md).

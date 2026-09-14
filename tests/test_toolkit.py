@@ -212,7 +212,7 @@ class ExportTests(unittest.TestCase):
 
     def test_symlinked_resources_and_ancestors_rejected(self):
         paths = (
-            "README.md", "LICENSE", "skills",
+            "README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "skills",
             "skills/autoresearch-scout", "skills/autoresearch-scout/scripts",
             "skills/autoresearch-scout/scripts/measure.py",
             *exporter.MANIFESTS.values(),
@@ -273,6 +273,8 @@ class ExportTests(unittest.TestCase):
                     self.assertFalse((target / ".auto").exists())
                     self.assertEqual((target / "LICENSE").read_bytes(),
                                      (ROOT / "LICENSE").read_bytes())
+                    self.assertEqual((target / "THIRD_PARTY_NOTICES.md").read_bytes(),
+                                     (ROOT / "THIRD_PARTY_NOTICES.md").read_bytes())
                     for source in (ROOT / "skills").rglob("*"):
                         if source.is_file() and "__pycache__" not in source.parts:
                             self.assertEqual(

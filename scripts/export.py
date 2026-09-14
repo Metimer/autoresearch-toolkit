@@ -19,6 +19,7 @@ MANIFESTS = {
 PORTABLE_FILES = (
     "README.md",
     "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "skills/autoresearch-scout/SKILL.md",
     "skills/autoresearch-scout/agents/openai.yaml",
     "skills/autoresearch-scout/assets/prompt.md",
