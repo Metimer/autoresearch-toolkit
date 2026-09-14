@@ -1,0 +1,4 @@
+interface:
+  display_name: "Autoresearch Scout"
+  short_description: "Préparer une baseline fiable sans optimiser"
+  default_prompt: "Utilise $autoresearch-scout pour préparer une baseline sans démarrer les expériences."

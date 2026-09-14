@@ -1,0 +1,4 @@
+interface:
+  display_name: "Autoresearch Run"
+  short_description: "Optimiser dans un périmètre et un budget définis"
+  default_prompt: "Utilise $autoresearch-run pour mener cinq expériences en vingt minutes maximum, sans commit."

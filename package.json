@@ -1,0 +1,21 @@
+{
+  "name": "autoresearch-toolkit",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Portable skills; original Pi engine archived separately",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "skills": [
+      "./skills"
+    ]
+  },
+  "files": [
+    "skills",
+    "README.md",
+    "PROVENANCE.md",
+    "LICENSE"
+  ]
+}
