@@ -1,137 +1,139 @@
 # Autoresearch Toolkit
 
-Extraction locale indépendante de l'IHM : scout personnalisé adapté et workflow
-d'optimisation portable. Version initiale 0.1.0, pas une certification tous agents.
+Des skills pour guider un agent de développement dans l’optimisation mesurée
+d’un projet : établir une mesure de référence, tester une hypothèse à la fois
+et ne conserver que les améliorations vérifiées.
 
-## Deux modes distincts
+Le workflow repose sur deux étapes :
 
-| Mode | Contenu | Exécution |
-| --- | --- | --- |
-| Portable | skills autoresearch-scout et autoresearch-run, helper de mesure | L'agent pilote les expériences avec ses outils habituels |
-| Pi original | originals/pi-autoresearch, copie exacte du paquet installé 1.8.1 | Extension Pi uniquement, outils et interface natifs |
+| Skill | Rôle |
+| --- | --- |
+| `autoresearch-scout` | Découvrir les tests et benchmarks, définir le périmètre et établir une référence reproductible. |
+| `autoresearch-run` | Mener des expériences dans un budget défini, comparer les résultats et conserver les changements validés. |
 
-Le scout d'origine est archivé dans originals/autoresearch-scout. Ces archives
-sont présentes dans l'extraction complète, jamais dans les exports portables.
-Le paquet racine ne charge PAS l'extension originale : son manifeste Pi ne
-déclare que les skills. Les deux modes ne doivent pas piloter la même session.
+## Prérequis
 
-Les sources originales sont préservées, pas auditées intégralement. Le moteur Pi
-contient des opérations larges de restauration/nettoyage Git. Ne le charger que
-dans un checkout jetable dédié après examen. Les garde-fous du mode portable ne
-modifient pas rétroactivement ce moteur. Voir [la provenance](PROVENANCE.md).
+- Un agent capable de lire des fichiers, modifier du code et exécuter des commandes.
+- Un projet cible sous Git, avec des vérifications de comportement exécutables.
+- Python 3.10 ou supérieur pour les scripts du toolkit, sans dépendance tierce.
+- macOS ou Linux pour le helper de mesure ; utiliser WSL sous Windows.
 
-## Utilisation commune à tous les agents
+## Démarrage rapide
 
-Un agent sachant lire des fichiers, éditer et exécuter des commandes peut recevoir :
+### 1. Préparer une référence
 
-> Lis skills/autoresearch-scout/SKILL.md dans ce toolkit. Prépare une baseline pour
-> mon dépôt, sans optimiser ni commiter. Objectif : [objectif concret].
+Depuis une session de votre agent ouverte sur le projet à optimiser :
 
-Puis, une fois la baseline approuvée :
+> Lis `/chemin/vers/autoresearch-toolkit/skills/autoresearch-scout/SKILL.md`.
+> Prépare une référence de performance pour ce dépôt, sans optimiser ni commiter.
+> Objectif : réduire le temps d’exécution de [commande ou traitement].
+> Budget de préparation : 10 minutes.
 
-> Utilise autoresearch-run. Maximum 5 expériences et 20 minutes ; uniquement les
-> chemins autorisés dans .auto/prompt.md. Ne commite pas.
+Le scout identifie les commandes réelles du projet, définit la métrique et les
+fichiers autorisés, puis exécute les vérifications et plusieurs séries de mesures.
+Il stocke le contexte, la méthode et les résultats dans `.auto/` du projet cible.
+Une référence trop bruitée doit être améliorée avant de lancer les expériences.
 
-Remplacer les chemins par ceux de l'installation réelle. Les skills référencent
-leurs ressources relativement à leur propre dossier, pas au checkout du toolkit.
-Le fichier .auto/prompt.md doit contenir le périmètre et la méthodologie observés.
-La préparation s'arrête avant toute optimisation. Pas de serveur MCP, d'appel
-LLM, de clé ni de téléchargement requis par les helpers. L'agent et les commandes
-du projet peuvent eux-mêmes nécessiter réseau, dépendances et autorisations.
+### 2. Lancer les expériences
 
-## Adaptateurs et installation volontaire
+Une fois la référence validée, dans un checkout isolé pour les expériences :
 
-Les manifestes du paquet racine référencent les mêmes sources skills/. Les
-formats ont été vérifiés dans les documentations officielles, mais aucune
-installation ni session LLM multi-hôte n'a été exécutée.
+> Lis `/chemin/vers/autoresearch-toolkit/skills/autoresearch-run/SKILL.md`.
+> Utilise la session `.auto/` préparée pour ce dépôt.
+> Maximum 5 expériences et 20 minutes, uniquement sur les chemins autorisés
+> dans `.auto/prompt.md`. Ne commite pas.
 
-| Agent | Format fourni | Alternative locale |
-| --- | --- | --- |
-| Codex | .codex-plugin/plugin.json | Copier les deux dossiers de skills dans .agents/skills du projet |
-| Claude Code | .claude-plugin/plugin.json | Charger le plugin local dans une nouvelle session |
-| Cursor | .cursor-plugin/plugin.json | Copier les deux dossiers dans .cursor/skills du projet |
-| Pi | package.json avec pi.skills | Charger le paquet de skills via Pi |
-| Autres | plugin.json Agent Plugins + SKILL.md | Fournir les instructions manuellement si le format n'est pas supporté |
+L’agent formule une hypothèse, applique un changement limité, exécute les tests
+et mesure son effet. Un gain doit dépasser le bruit observé et préserver le
+comportement du projet. Les résultats sont consignés dans
+`.auto/portable-log.jsonl` ; l’état des changements conservés est décrit dans
+`.auto/portable-state.md` pour une reprise explicite.
 
-Choisir UN mode de découverte par agent pour éviter les doublons de noms.
-Ne pas écraser un scout existant lors d'une installation ; examiner le diff et
-conserver l'original. Aucune configuration globale ou marketplace n'est modifiée
-par cette extraction.
+Adaptez les chemins et les budgets à votre installation et à votre projet.
+La préparation de la référence et le lancement des expériences sont deux demandes
+distinctes. Les fichiers `.auto/` restent locaux au projet cible.
 
-Pour produire des paquets séparés, depuis l'extraction complète :
+## Formats d’intégration
+
+Le toolkit fournit les manifestes suivants, qui utilisent les mêmes skills :
+
+| Hôte | Manifeste fourni |
+| --- | --- |
+| Codex | `.codex-plugin/plugin.json` |
+| Claude Code | `.claude-plugin/plugin.json` |
+| Cursor | `.cursor-plugin/plugin.json` |
+| Pi | `package.json`, via `pi.skills` |
+| Agent Plugins | `plugin.json` |
+
+Utilisez le mécanisme de chargement de votre hôte ou fournissez directement le
+chemin du skill à l’agent, comme dans les exemples ci-dessus. Choisissez un seul
+mode de découverte pour éviter les doublons. La présence d’un manifeste ne garantit
+pas son chargement dans toutes les versions de l’hôte.
+
+## Exporter un paquet
+
+Depuis la racine du dépôt, produisez un paquet pour l’hôte choisi :
 
 ```sh
 python3 scripts/export.py --agent codex --output dist/codex/autoresearch-toolkit
-python3 scripts/export.py --agent claude --output dist/claude/autoresearch-toolkit
-python3 scripts/export.py --agent cursor --output dist/cursor/autoresearch-toolkit
-python3 scripts/export.py --agent pi --output dist/pi/autoresearch-toolkit
-python3 scripts/export.py --agent generic --output dist/generic/autoresearch-toolkit
 ```
 
-L'export refuse une destination existante, y compris un lien symbolique ; il ne
-fusionne pas avec un agent installé. En cas d'erreur disque, une sortie partielle
-peut rester pour inspection. Déplacer/inspecter cette sortie avant de réessayer.
-Les exports ne contiennent pas l'exporteur ni les tests : les maintenir ici.
-Seuls les fichiers déclarés dans `PORTABLE_FILES` de `scripts/export.py` et le
-manifeste de l'agent sont distribués. Tout ajout de ressource à un skill doit
-être examiné puis ajouté à cette liste. Les fichiers locaux supplémentaires,
-y compris `.env`, `.auto/`, clés et caches, sont omis sans dépendre du `.gitignore`.
-Chaque composant des chemins sources sous la racine est vérifié : un lien
-symbolique, une ressource absente ou de type incorrect bloque l'export avant
-création de la destination. Une destination dans `skills/` est également refusée.
-La liste contrôle les chemins distribués ; examiner aussi le contenu des fichiers
-autorisés avant diffusion. Les sources doivent rester stables pendant la copie.
+Les valeurs acceptées par `--agent` sont `codex`, `claude`, `cursor`, `pi` et
+`generic`. La destination doit être un nouveau dossier nommé
+`autoresearch-toolkit`, situé hors des skills sources.
 
-Exemple de chargement temporaire Claude Code, depuis le projet à travailler
-(à lancer volontairement, peut démarrer une session avec votre fournisseur LLM) :
+Chaque paquet contient les skills, leurs ressources, le manifeste sélectionné,
+le README et la licence. L’export utilise une liste explicite de fichiers et
+refuse les liens symboliques dans leurs chemins sources. Il ne remplace pas une
+installation existante. En cas d’erreur de copie, une sortie partielle peut rester
+sur disque ; inspectez-la avant de réessayer.
+
+## Mesurer une commande
+
+Le helper peut également être utilisé directement :
 
 ```sh
-claude --plugin-dir /chemin/vers/autoresearch-toolkit
+python3 skills/autoresearch-scout/scripts/measure.py \
+  --name bench_ms --runs 5 --warmup 1 --timeout 10 --budget 60 \
+  -- python3 -c 'sum(range(1000000))'
 ```
 
-Pour les autres hôtes, utiliser le gestionnaire de plugins/paquets de la version
-installée ou la découverte locale ci-dessus. Pas de promesse de support natif
-pour un agent inconnu : le mode manuel reste le dénominateur commun.
+Il mesure le temps écoulé en millisecondes et publie trois lignes `METRIC` :
+la médiane (`bench_ms` dans cet exemple), le minimum (`run_min_ms`) et le maximum
+(`run_max_ms`). Les mesures d’échauffement sont exclues. Les sorties de la commande
+vont sur stderr ; un échec ou un dépassement de délai ne produit aucune métrique.
 
-## Mesure et limites
+Ce helper convient aux durées de commandes. Le lancement de processus ajoute du
+bruit aux traitements très courts. La mémoire, la taille ou le débit nécessitent
+une commande de mesure adaptée.
 
-Python 3.10+, bibliothèque standard uniquement ; helper de mesure pour macOS/Linux
-(WSL pour Windows). Les tests synthétiques n'exécutent pas les tests de l'IHM.
+## Cadre d’exécution
+
+Le workflow est piloté par l’agent. Le périmètre d’édition, la protection des tests
+et le budget global sont des consignes qu’il doit respecter. Le helper impose
+ses propres délais de mesure et termine le groupe de processus lancé en cas de
+timeout ou d’interruption ; il ne constitue pas une sandbox.
+
+Les scripts du toolkit ne demandent ni clé API ni connexion à un fournisseur LLM.
+L’agent et les commandes du projet peuvent avoir leurs propres dépendances et
+besoins réseau. Toute reprise de la boucle requiert une nouvelle invocation.
+
+## Développement
+
+Exécuter les tests depuis la racine du dépôt :
 
 ```sh
 python3 -m unittest discover -s tests -v
-python3 skills/autoresearch-scout/scripts/measure.py --name bench_ms --runs 3 --warmup 1 --timeout 5 --budget 20 -- python3 -c 'sum(range(10000))'
 ```
 
-Le helper mesure le temps mural d'une commande, warmups exclus, médiane et bornes
-incluses. Il ne remplace pas un microbenchmark : lancement de processus et attente
-ajoutent du bruit pour les workloads très courts. Il ne mesure pas directement
-la mémoire, la taille ou le débit ; ces métriques demandent un measure.sh adapté.
-Sur échec/timeout, aucun METRIC n'est publié. Les sorties de la commande vont sur
-stderr. Un timeout/interruption tue le groupe de processus lancé ; un programme
-qui se détache volontairement peut s'y soustraire. Ce n'est PAS une sandbox.
+La suite couvre les mesures, les échecs, les délais et les exports des cinq formats.
+Pour ajouter une ressource à un skill, déclarez-la dans `PORTABLE_FILES` de
+`scripts/export.py` afin de l’inclure dans les paquets distribués.
 
-Les limites de mesure sont appliquées par le code. Le périmètre d'édition, la
-protection des tests, les décisions et le budget global de la boucle sont des
-consignes exécutées par l'agent, pas un contrôleur autonome inviolable. Pas de
-hooks de relance, de reprise automatique après quota ni de dashboard dans le
-mode portable. Une reprise requiert une nouvelle invocation explicite.
+Les sources de référence dans `originals/` sont distinctes des skills maintenus
+et ne sont ni chargées par les manifestes racine ni incluses dans les exports.
 
-## Versionnement
+## Licence
 
-Versionner skills/, scripts/, tests/, manifestes et provenance dans un dépôt dédié.
-Les .auto/ des projets sont locales et ignorées ; ne pas exporter les sessions,
-clés, conversations, configurations de fournisseurs ou données de benchmark.
-Les fichiers personnalisés sont sous [licence MIT](LICENSE), copyright 2026
-metinam. Chaque export inclut cette licence. La copie du moteur conserve sa
-propre licence MIT et ses attributions dans `originals/pi-autoresearch/LICENSE`.
-Voir [l'audit avant mise en dépôt](AUDIT.md) dans l'extraction complète.
-
-## Sources des formats
-
-Vérifiées le 14 septembre 2026 :
-
-- [Codex skills](https://learn.chatgpt.com/docs/build-skills) et [plugins](https://learn.chatgpt.com/docs/build-plugins).
-- [Claude Code plugin structure](https://github.com/anthropics/claude-code/blob/main/plugins/plugin-dev/skills/plugin-structure/examples/minimal-plugin.md) et [chargement local](https://github.com/anthropics/claude-code/blob/main/plugins/plugin-dev/commands/create-plugin.md).
-- [Cursor skills](https://cursor.com/docs/skills) et [plugins](https://cursor.com/docs/plugins).
-- [Pi packages](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md).
+[MIT](LICENSE). Les composants tiers conservés dans `originals/` gardent leurs
+licences et attributions respectives.
