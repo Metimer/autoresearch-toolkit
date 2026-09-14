@@ -1,96 +1,92 @@
 # Autoresearch Toolkit
 
-Des skills pour guider un agent de développement dans l’optimisation mesurée
-d’un projet : établir une mesure de référence, tester une hypothèse à la fois
-et ne conserver que les améliorations vérifiées.
+Skills that guide a coding agent through measured optimization: establish a
+baseline, test one hypothesis at a time, and keep only verified improvements.
 
-Le workflow repose sur deux étapes :
+The workflow has two stages:
 
-| Skill | Rôle |
+| Skill | Purpose |
 | --- | --- |
-| `autoresearch-scout` | Découvrir les tests et benchmarks, définir le périmètre et établir une référence reproductible. |
-| `autoresearch-run` | Mener des expériences dans un budget défini, comparer les résultats et conserver les changements validés. |
+| `autoresearch-scout` | Discover tests and benchmarks, define the scope, and establish a reproducible baseline. |
+| `autoresearch-run` | Run experiments within a defined budget, compare results, and retain validated changes. |
 
-## Prérequis
+## Requirements
 
-- Un agent capable de lire des fichiers, modifier du code et exécuter des commandes.
-- Un projet cible sous Git, avec des vérifications de comportement exécutables.
-- Python 3.10 ou supérieur pour les scripts du toolkit, sans dépendance tierce.
-- macOS ou Linux pour le helper de mesure ; utiliser WSL sous Windows.
+- An agent that can read files, edit code, and run commands.
+- A target project under Git with executable behavior checks.
+- Python 3.10 or later for the toolkit scripts, with no third-party dependencies.
+- macOS or Linux for the measurement helper; use WSL on Windows.
 
-## Démarrage rapide
+## Quick start
 
-### 1. Préparer une référence
+### 1. Prepare a baseline
 
-Depuis une session de votre agent ouverte sur le projet à optimiser :
+In an agent session opened on the project you want to optimize:
 
-> Lis `/chemin/vers/autoresearch-toolkit/skills/autoresearch-scout/SKILL.md`.
-> Prépare une référence de performance pour ce dépôt, sans optimiser ni commiter.
-> Objectif : réduire le temps d’exécution de [commande ou traitement].
-> Budget de préparation : 10 minutes.
+> Read `/path/to/autoresearch-toolkit/skills/autoresearch-scout/SKILL.md`.
+> Prepare a performance baseline for this repository without optimizing or committing.
+> Goal: reduce the execution time of [command or workload].
+> Preparation budget: 10 minutes.
 
-Le scout identifie les commandes réelles du projet, définit la métrique et les
-fichiers autorisés, puis exécute les vérifications et plusieurs séries de mesures.
-Il stocke le contexte, la méthode et les résultats dans `.auto/` du projet cible.
-Une référence trop bruitée doit être améliorée avant de lancer les expériences.
+The scout identifies the project's actual commands, defines the metric and allowed
+files, then runs the checks and several rounds of measurements. It stores the
+context, methodology, and results in the target project's `.auto/` directory.
+An unstable baseline must be improved before experiments begin.
 
-### 2. Lancer les expériences
+### 2. Run experiments
 
-Une fois la référence validée, dans un checkout isolé pour les expériences :
+Once the baseline is validated, use an isolated checkout for experiments:
 
-> Lis `/chemin/vers/autoresearch-toolkit/skills/autoresearch-run/SKILL.md`.
-> Utilise la session `.auto/` préparée pour ce dépôt.
-> Maximum 5 expériences et 20 minutes, uniquement sur les chemins autorisés
-> dans `.auto/prompt.md`. Ne commite pas.
+> Read `/path/to/autoresearch-toolkit/skills/autoresearch-run/SKILL.md`.
+> Use the `.auto/` session prepared for this repository.
+> Run at most 5 experiments within 20 minutes, changing only the paths allowed
+> in `.auto/prompt.md`. Do not commit.
 
-L’agent formule une hypothèse, applique un changement limité, exécute les tests
-et mesure son effet. Un gain doit dépasser le bruit observé et préserver le
-comportement du projet. Les résultats sont consignés dans
-`.auto/portable-log.jsonl` ; l’état des changements conservés est décrit dans
-`.auto/portable-state.md` pour une reprise explicite.
+The agent states a hypothesis, makes a scoped change, runs the tests, and measures
+its effect. An improvement must exceed the observed noise and preserve the
+project's behavior. Results are recorded in `.auto/portable-log.jsonl`; retained
+changes are described in `.auto/portable-state.md` for an explicit resume request.
 
-Adaptez les chemins et les budgets à votre installation et à votre projet.
-La préparation de la référence et le lancement des expériences sont deux demandes
-distinctes. Les fichiers `.auto/` restent locaux au projet cible.
+Adjust paths and budgets to your installation and project. Preparing a baseline
+and starting experiments are separate requests. The `.auto/` files stay local
+to the target project.
 
-## Formats d’intégration
+## Integration formats
 
-Le toolkit fournit les manifestes suivants, qui utilisent les mêmes skills :
+The toolkit provides the following manifests, all using the same skills:
 
-| Hôte | Manifeste fourni |
+| Host | Included manifest |
 | --- | --- |
 | Codex | `.codex-plugin/plugin.json` |
 | Claude Code | `.claude-plugin/plugin.json` |
 | Cursor | `.cursor-plugin/plugin.json` |
-| Pi | `package.json`, via `pi.skills` |
+| Pi | `package.json`, through `pi.skills` |
 | Agent Plugins | `plugin.json` |
 
-Utilisez le mécanisme de chargement de votre hôte ou fournissez directement le
-chemin du skill à l’agent, comme dans les exemples ci-dessus. Choisissez un seul
-mode de découverte pour éviter les doublons. La présence d’un manifeste ne garantit
-pas son chargement dans toutes les versions de l’hôte.
+Use your host's loading mechanism or give the agent the skill's path directly,
+as shown above. Choose one discovery method to avoid duplicates. Providing a
+manifest does not guarantee that every version of the host can load it.
 
-## Exporter un paquet
+## Export a bundle
 
-Depuis la racine du dépôt, produisez un paquet pour l’hôte choisi :
+From the repository root, create a bundle for your chosen host:
 
 ```sh
 python3 scripts/export.py --agent codex --output dist/codex/autoresearch-toolkit
 ```
 
-Les valeurs acceptées par `--agent` sont `codex`, `claude`, `cursor`, `pi` et
-`generic`. La destination doit être un nouveau dossier nommé
-`autoresearch-toolkit`, situé hors des skills sources.
+Accepted values for `--agent` are `codex`, `claude`, `cursor`, `pi`, and `generic`.
+The destination must be a new directory named `autoresearch-toolkit`, located
+outside the source skills directory.
 
-Chaque paquet contient les skills, leurs ressources, le manifeste sélectionné,
-le README et la licence. L’export utilise une liste explicite de fichiers et
-refuse les liens symboliques dans leurs chemins sources. Il ne remplace pas une
-installation existante. En cas d’erreur de copie, une sortie partielle peut rester
-sur disque ; inspectez-la avant de réessayer.
+Each bundle contains the skills, their resources, the selected manifest, the
+README, and the license. The exporter uses an explicit file list and rejects
+symbolic links in source paths. It does not overwrite an existing installation.
+If copying fails, a partial output may remain on disk; inspect it before retrying.
 
-## Mesurer une commande
+## Measure a command
 
-Le helper peut également être utilisé directement :
+You can also use the measurement helper directly:
 
 ```sh
 python3 skills/autoresearch-scout/scripts/measure.py \
@@ -98,42 +94,41 @@ python3 skills/autoresearch-scout/scripts/measure.py \
   -- python3 -c 'sum(range(1000000))'
 ```
 
-Il mesure le temps écoulé en millisecondes et publie trois lignes `METRIC` :
-la médiane (`bench_ms` dans cet exemple), le minimum (`run_min_ms`) et le maximum
-(`run_max_ms`). Les mesures d’échauffement sont exclues. Les sorties de la commande
-vont sur stderr ; un échec ou un dépassement de délai ne produit aucune métrique.
+It measures elapsed time in milliseconds and prints three `METRIC` lines: the
+median (`bench_ms` in this example), minimum (`run_min_ms`), and maximum
+(`run_max_ms`). Warmup measurements are excluded. Command output goes to stderr;
+a failure or timeout produces no metrics.
 
-Ce helper convient aux durées de commandes. Le lancement de processus ajoute du
-bruit aux traitements très courts. La mémoire, la taille ou le débit nécessitent
-une commande de mesure adaptée.
+The helper measures command duration. Process startup adds noise to very short
+workloads. Memory, size, and throughput require a suitable measurement command.
 
-## Cadre d’exécution
+## Execution model
 
-Le workflow est piloté par l’agent. Le périmètre d’édition, la protection des tests
-et le budget global sont des consignes qu’il doit respecter. Le helper impose
-ses propres délais de mesure et termine le groupe de processus lancé en cas de
-timeout ou d’interruption ; il ne constitue pas une sandbox.
+The agent drives the workflow. Editing scope, test protection, and the overall
+budget are instructions it must follow. The helper enforces its own measurement
+timeouts and terminates the process group it started on timeout or interruption;
+it is not a sandbox.
 
-Les scripts du toolkit ne demandent ni clé API ni connexion à un fournisseur LLM.
-L’agent et les commandes du projet peuvent avoir leurs propres dépendances et
-besoins réseau. Toute reprise de la boucle requiert une nouvelle invocation.
+The toolkit scripts require no API key or LLM provider connection. The agent and
+the project's commands may have their own dependencies and network requirements.
+Resuming the loop requires a new invocation.
 
-## Développement
+## Development
 
-Exécuter les tests depuis la racine du dépôt :
+Run the tests from the repository root:
 
 ```sh
 python3 -m unittest discover -s tests -v
 ```
 
-La suite couvre les mesures, les échecs, les délais et les exports des cinq formats.
-Pour ajouter une ressource à un skill, déclarez-la dans `PORTABLE_FILES` de
-`scripts/export.py` afin de l’inclure dans les paquets distribués.
+The suite covers measurements, failures, timeouts, and exports for all five
+formats. When adding a resource to a skill, declare it in `PORTABLE_FILES` in
+`scripts/export.py` to include it in distributed bundles.
 
-Les sources de référence dans `originals/` sont distinctes des skills maintenus
-et ne sont ni chargées par les manifestes racine ni incluses dans les exports.
+Reference sources in `originals/` are separate from the maintained skills. They
+are neither loaded by the root manifests nor included in exports.
 
-## Licence
+## License
 
-[MIT](LICENSE). Les composants tiers conservés dans `originals/` gardent leurs
-licences et attributions respectives.
+[MIT](LICENSE). Third-party components retained in `originals/` keep their
+respective licenses and attributions.
