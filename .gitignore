@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 .DS_Store
 /dist/
+/target/
 
 # Local audit reports, including dated variants.
 [Aa][Uu][Dd][Ii][Tt]*.md

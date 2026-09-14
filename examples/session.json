@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "session_id": "example-session",
+  "goal": "Reduce the duration of a measured workload without changing behavior",
+  "source": {
+    "repository": ".",
+    "commit": "0000000000000000000000000000000000000000"
+  },
+  "scope": {
+    "allowed_paths": ["src/"],
+    "protected_paths": ["tests/", "Cargo.toml", "Cargo.lock"]
+  },
+  "checks": [{"executable": "cargo", "args": ["test", "--locked"], "cwd": "."}],
+  "benchmark": {"executable": "python3", "args": ["benchmarks/run.py"], "cwd": "."},
+  "metric": {
+    "name": "bench_ms",
+    "unit": "ms",
+    "direction": "lower",
+    "domain": "positive",
+    "minimum_improvement": 1.0
+  },
+  "sampling": {"runs": 5, "warmup": 1},
+  "budget": {
+    "max_experiments": 5,
+    "active_seconds": 1200,
+    "command_timeout_seconds": 60,
+    "deadline_unix_ms": 1893456000000,
+    "max_output_bytes": 1048576,
+    "max_artifact_bytes": 104857600
+  }
+}

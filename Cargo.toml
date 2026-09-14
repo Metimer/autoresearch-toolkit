@@ -1,0 +1,19 @@
+[workspace]
+members = ["crates/autoresearch-core", "crates/autoresearch-cli"]
+resolver = "2"
+
+[workspace.package]
+version = "0.2.0-dev"
+edition = "2021"
+rust-version = "1.81"
+license = "MIT"
+authors = ["Metimer <metinamerwane@gmail.com>"]
+publish = false
+
+[workspace.dependencies]
+autoresearch-core = { path = "crates/autoresearch-core" }
+serde = { version = "1.0.210", features = ["derive"] }
+serde_json = "1.0.128"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
