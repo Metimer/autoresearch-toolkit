@@ -1,0 +1,28 @@
+.auto/
+__pycache__/
+*.py[cod]
+.DS_Store
+/dist/
+
+# Local credentials; keep deliberately sanitized examples versionable.
+.env
+.env.*
+!.env.example
+!.env.sample
+.npmrc
+.pypirc
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# Local dependencies and caches.
+node_modules/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
