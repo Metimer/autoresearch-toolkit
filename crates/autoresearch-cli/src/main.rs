@@ -1,4 +1,7 @@
-use autoresearch_core::{ValidatedConfig, MAX_CONFIG_BYTES};
+use autoresearch_core::{
+    session::{SessionError, SessionStore},
+    ValidatedConfig, MAX_CONFIG_BYTES,
+};
 use serde_json::{json, Value};
 use std::{
     env,
@@ -9,17 +12,25 @@ use std::{
     process::ExitCode,
 };
 
-const HELP: &str = "Autoresearch Toolkit — Rust engine foundation
+const HELP: &str = "Autoresearch Toolkit — Rust session engine
 
 Usage:
   autoresearch doctor [--json]
   autoresearch validate --config <file> [--json]
+  autoresearch schema
+  autoresearch init --config <file> --operation-id <id> [--root <dir>] [--json]
+  autoresearch status --session <id> [--root <dir>] [--json]
+  autoresearch resume --session <id> --operation-id <id> [--root <dir>] [--repair-tail] [--json]
+  autoresearch stop --session <id> --operation-id <id> [--root <dir>] [--json]
   autoresearch --help
   autoresearch --version
 
 doctor checks the supported platform and Git executable discovery (not its version).
 validate checks the draft JSON contract without executing commands, inspecting the
 source repository, checking the current deadline, or creating a session.
+Session commands persist metadata below the explicit root (default: current directory).
+Use the same operation ID to retry a mutation; use a new ID for a new operation.
+resume activates metadata only; stop does not signal a running supervisor yet.
 Experiment execution and the Pi adapter are not implemented yet.
 ";
 
@@ -53,10 +64,29 @@ fn main() -> ExitCode {
         [command, flag, file] if command == "validate" && flag == "--config" => {
             validate(Path::new(file), as_json)
         }
+        [command] if command == "schema" => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&autoresearch_core::config::schema())
+                    .expect("schema is serializable")
+            );
+            ExitCode::SUCCESS
+        }
+        [command, rest @ ..]
+            if ["init", "status", "resume", "stop"]
+                .iter()
+                .any(|name| command == name) =>
+        {
+            session_command(
+                command.to_str().expect("matched ASCII command"),
+                rest,
+                as_json,
+            )
+        }
         _ => error(
             as_json,
             "usage",
-            "expected doctor or validate --config <file>; use --help",
+            "invalid command or arguments; use --help",
             2,
         ),
     }
@@ -92,9 +122,9 @@ fn doctor(as_json: bool) -> ExitCode {
         "platform": {"os": env::consts::OS, "arch": env::consts::ARCH, "supported": supported},
         "git_on_path": git_found,
         "git_version_verified": false,
-        "capabilities": {"validate_config": true, "run_experiments": false, "pi_adapter": false}
+        "capabilities": {"validate_config": true, "manage_sessions": supported, "run_experiments": false, "pi_adapter": false}
     }), &format!(
-        "Autoresearch {}\nPlatform: {} / {} (supported: {})\nGit executable on PATH: {} (version not verified)\nAvailable: configuration validation. Experiment execution is not implemented yet.",
+        "Autoresearch {}\nPlatform: {} / {} (supported: {})\nGit executable on PATH: {} (version not verified)\nAvailable: configuration validation and persistent session metadata. Experiment execution is not implemented yet.",
         env!("CARGO_PKG_VERSION"), env::consts::OS, env::consts::ARCH, supported, git_found
     ));
     if ready {
@@ -127,38 +157,32 @@ fn find_git() -> Option<PathBuf> {
         })
 }
 
-fn validate(path: &Path, as_json: bool) -> ExitCode {
-    let Ok(metadata) = fs::symlink_metadata(path) else {
-        return error(as_json, "io", "cannot inspect configuration file", 1);
-    };
+fn load_config(path: &Path) -> Result<ValidatedConfig, (&'static str, String, u8)> {
+    let io = |message: &str| ("io", message.to_owned(), 1);
+    let metadata =
+        fs::symlink_metadata(path).map_err(|_| io("cannot inspect configuration file"))?;
     if !metadata.is_file() {
-        return error(
-            as_json,
-            "io",
+        return Err(io(
             "configuration must be a regular file, not a symlink or directory",
-            1,
-        );
+        ));
     }
     if metadata.len() > MAX_CONFIG_BYTES as u64 {
-        return error(
-            as_json,
+        return Err((
             "invalid_config",
-            "configuration exceeds the 1 MiB input limit",
+            "configuration exceeds the 1 MiB input limit".into(),
             2,
-        );
+        ));
     }
-    let Ok(file) = fs::File::open(path) else {
-        return error(as_json, "io", "cannot open configuration file", 1);
-    };
+    let file = fs::File::open(path).map_err(|_| io("cannot open configuration file"))?;
     let mut bytes = Vec::new();
-    if file
-        .take(MAX_CONFIG_BYTES as u64 + 1)
+    file.take(MAX_CONFIG_BYTES as u64 + 1)
         .read_to_end(&mut bytes)
-        .is_err()
-    {
-        return error(as_json, "io", "cannot read configuration file", 1);
-    }
-    match ValidatedConfig::from_json(&bytes) {
+        .map_err(|_| io("cannot read configuration file"))?;
+    ValidatedConfig::from_json(&bytes).map_err(|issue| ("invalid_config", issue.to_string(), 2))
+}
+
+fn validate(path: &Path, as_json: bool) -> ExitCode {
+    match load_config(path) {
         Ok(config) => {
             emit(as_json, json!({
                 "schema_version": 1, "command": "validate", "ok": true,
@@ -170,6 +194,143 @@ fn validate(path: &Path, as_json: bool) -> ExitCode {
             }), "Configuration is valid. Repository, current deadline and command behavior have not been checked. No session was created.");
             ExitCode::SUCCESS
         }
-        Err(issue) => error(as_json, "invalid_config", &issue.to_string(), 2),
+        Err((code, message, exit)) => error(as_json, code, &message, exit),
     }
+}
+
+#[derive(Default)]
+struct SessionArgs {
+    root: Option<PathBuf>,
+    config: Option<PathBuf>,
+    session: Option<String>,
+    operation: Option<String>,
+    repair: bool,
+}
+
+fn session_args(command: &str, args: &[OsString]) -> Result<SessionArgs, &'static str> {
+    let mut parsed = SessionArgs::default();
+    let mut iter = args.iter();
+    while let Some(flag) = iter.next() {
+        if flag == "--repair-tail" && command == "resume" && !parsed.repair {
+            parsed.repair = true;
+            continue;
+        }
+        let value = iter.next().ok_or("missing option value")?;
+        match flag.to_str() {
+            Some("--root") if parsed.root.is_none() => parsed.root = Some(value.into()),
+            Some("--config") if command == "init" && parsed.config.is_none() => {
+                parsed.config = Some(value.into())
+            }
+            Some("--session") if command != "init" && parsed.session.is_none() => {
+                parsed.session = Some(value.to_str().ok_or("session ID must be UTF-8")?.into());
+            }
+            Some("--operation-id") if command != "status" && parsed.operation.is_none() => {
+                let id = value.to_str().ok_or("operation ID must be UTF-8")?;
+                if id.is_empty()
+                    || id.len() > 128
+                    || !id
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                {
+                    return Err("operation ID must use 1..128 ASCII letters, digits, hyphens or underscores");
+                }
+                parsed.operation = Some(id.into());
+            }
+            _ => return Err("unknown, repeated or unsupported session option"),
+        }
+    }
+    if (command == "init" && parsed.config.is_none())
+        || (command != "init" && parsed.session.is_none())
+        || (command != "status" && parsed.operation.is_none())
+    {
+        return Err("missing required session option; use --help");
+    }
+    Ok(parsed)
+}
+
+fn session_command(command: &str, args: &[OsString], as_json: bool) -> ExitCode {
+    let args = match session_args(command, args) {
+        Ok(args) => args,
+        Err(message) => return error(as_json, "usage", message, 2),
+    };
+    let now = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(time) => match u64::try_from(time.as_millis()) {
+            Ok(ms) => ms,
+            Err(_) => {
+                return error(
+                    as_json,
+                    "clock_regressed",
+                    "system clock is outside the supported range",
+                    7,
+                )
+            }
+        },
+        Err(_) => {
+            return error(
+                as_json,
+                "clock_regressed",
+                "system clock precedes the Unix epoch",
+                7,
+            )
+        }
+    };
+    let root = args.root.as_deref().unwrap_or_else(|| Path::new("."));
+    let store = match SessionStore::new(root) {
+        Ok(store) => store,
+        Err(issue) => return session_error(as_json, issue),
+    };
+    let opened = if command == "init" {
+        let config = match load_config(args.config.as_deref().expect("checked config")) {
+            Ok(config) => config,
+            Err((code, message, exit)) => return error(as_json, code, &message, exit),
+        };
+        store.init(
+            config,
+            args.operation.as_deref().expect("checked operation"),
+            now,
+        )
+    } else {
+        store.open(
+            args.session.as_deref().expect("checked session"),
+            args.repair,
+        )
+    };
+    let mut guard = match opened {
+        Ok(guard) => guard,
+        Err(issue) => return session_error(as_json, issue),
+    };
+    let mutation = match command {
+        "resume" => guard.resume(args.operation.as_deref().expect("checked operation"), now),
+        "stop" => guard.stop(args.operation.as_deref().expect("checked operation"), now),
+        _ => Ok(false),
+    };
+    let already_applied = match mutation {
+        Ok(value) => value,
+        Err(issue) => return session_error(as_json, issue),
+    };
+    let view = guard.view(now);
+    let mut result = json!({"schema_version": 1, "command": command, "ok": true, "session": view, "commands_executed": false});
+    if command == "resume" || command == "stop" {
+        result["already_applied"] = json!(already_applied);
+    }
+    if let Some(operation) = args.operation {
+        result["operation_id"] = json!(operation);
+    }
+    emit(as_json, result, &format!("Session {}: {:?} (event {})\nBudget remaining: {} attempts, {} ms; deadline expired: {}\nRecovery required: {}; state projection current: {}",
+        view.state.session_id, view.state.status, view.state.sequence, view.attempts_remaining,
+        view.active_ms_remaining, view.deadline_expired, view.recovery_required, view.projection_current));
+    ExitCode::SUCCESS
+}
+
+fn session_error(as_json: bool, issue: SessionError) -> ExitCode {
+    let exit = match issue.code {
+        "invalid_config" | "invalid_identifier" => 2,
+        "unsupported" => 3,
+        "conflict" | "session_busy" => 4,
+        "corrupt_session" | "projection_failed" | "unsafe_path" | "storage_limit" => 5,
+        "budget_exhausted" => 6,
+        "clock_regressed" => 7,
+        _ => 1,
+    };
+    error(as_json, issue.code, &issue.message, exit)
 }

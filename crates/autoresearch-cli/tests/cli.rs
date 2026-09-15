@@ -159,3 +159,196 @@ fn symlinked_config_is_not_read() {
         .unwrap();
     assert_eq!(result.status.code(), Some(1));
 }
+
+fn session_config(fixture: &Fixture) -> String {
+    let mut config: Value =
+        serde_json::from_str(include_str!("../../../examples/session.json")).unwrap();
+    config["budget"]["deadline_unix_ms"] = json!(4_000_000_000_000_u64);
+    config["source"]["repository"] = json!("missing-repository");
+    config["execution"]["hooks"]["before"] =
+        json!([{"executable":"/this-must-not-run","args":[],"cwd":"."}]);
+    fs::write(
+        fixture.0.join("config.json"),
+        serde_json::to_vec(&config).unwrap(),
+    )
+    .unwrap();
+    config["session_id"].as_str().unwrap().into()
+}
+
+#[test]
+fn separate_cli_processes_initialize_resume_stop_and_replay_without_executing() {
+    let fixture = Fixture::new();
+    let id = session_config(&fixture);
+    let root = fixture.0.join("project with spaces");
+    fs::create_dir(&root).unwrap();
+    let run = |args: &[&str]| {
+        fixture
+            .cli()
+            .args(args)
+            .arg("--root")
+            .arg(&root)
+            .arg("--json")
+            .output()
+            .unwrap()
+    };
+    let first = run(&[
+        "init",
+        "--config",
+        "config.json",
+        "--operation-id",
+        "create-1",
+    ]);
+    assert!(first.status.success(), "{first:?}");
+    assert_eq!(body(&first)["session"]["state"]["status"], "created");
+    assert_eq!(body(&first)["commands_executed"], false);
+    assert!(!fixture.0.join(".auto").exists());
+    let journal = root
+        .join(".auto/engine/sessions")
+        .join(&id)
+        .join("events.jsonl");
+    let initialized = fs::read(&journal).unwrap();
+    assert!(run(&[
+        "init",
+        "--config",
+        "config.json",
+        "--operation-id",
+        "create-1"
+    ])
+    .status
+    .success());
+    assert_eq!(fs::read(&journal).unwrap(), initialized);
+    for (command, operation, expected) in [
+        ("resume", "r1", "active"),
+        ("stop", "s1", "stopped"),
+        ("resume", "r2", "active"),
+    ] {
+        let args = [command, "--session", &id, "--operation-id", operation];
+        let result = run(&args);
+        assert!(result.status.success(), "{result:?}");
+        assert_eq!(body(&result)["session"]["state"]["status"], expected);
+        assert_eq!(body(&result)["already_applied"], false);
+        let bytes = fs::read(&journal).unwrap();
+        let repeated = run(&args);
+        assert!(repeated.status.success(), "{repeated:?}");
+        assert_eq!(body(&repeated)["already_applied"], true);
+        assert_eq!(fs::read(&journal).unwrap(), bytes);
+        let status = run(&["status", "--session", &id]);
+        assert!(status.status.success());
+        assert_eq!(body(&status)["session"]["state"]["status"], expected);
+        assert_eq!(fs::read(&journal).unwrap(), bytes);
+    }
+    let conflict = run(&["stop", "--session", &id, "--operation-id", "r2"]);
+    assert_eq!(conflict.status.code(), Some(4));
+    assert_eq!(body(&conflict)["error"]["code"], "conflict");
+}
+
+#[test]
+fn session_usage_expiry_and_recovery_errors_have_stable_codes() {
+    let fixture = Fixture::new();
+    let id = session_config(&fixture);
+    for args in [
+        vec!["init", "--config", "config.json"],
+        vec!["status", "--session", &id, "--repair-tail"],
+        vec![
+            "resume",
+            "--session",
+            &id,
+            "--operation-id",
+            "x",
+            "--operation-id",
+            "x",
+        ],
+        vec!["stop", "--session", &id, "--operation-id", "bad/id"],
+        vec![
+            "init",
+            "--config",
+            "config.json",
+            "--operation-id",
+            "x",
+            "--root",
+            ".",
+            "--root",
+            ".",
+        ],
+    ] {
+        let result = fixture.cli().args(args).arg("--json").output().unwrap();
+        assert_eq!(result.status.code(), Some(2));
+        assert!(!fixture.0.join(".auto").exists());
+    }
+    let mut config: Value =
+        serde_json::from_slice(&fs::read(fixture.0.join("config.json")).unwrap()).unwrap();
+    config["budget"]["deadline_unix_ms"] = json!(1);
+    fs::write(
+        fixture.0.join("expired.json"),
+        serde_json::to_vec(&config).unwrap(),
+    )
+    .unwrap();
+    let expired = fixture
+        .cli()
+        .args([
+            "init",
+            "--config",
+            "expired.json",
+            "--operation-id",
+            "create",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(expired.status.code(), Some(6));
+    assert_eq!(body(&expired)["error"]["code"], "budget_exhausted");
+    let init = fixture
+        .cli()
+        .args([
+            "init",
+            "--config",
+            "config.json",
+            "--operation-id",
+            "create",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(init.status.success());
+    let journal = fixture
+        .0
+        .join(".auto/engine/sessions")
+        .join(&id)
+        .join("events.jsonl");
+    let mut bytes = fs::read(&journal).unwrap();
+    bytes.extend_from_slice(b"{");
+    fs::write(&journal, &bytes).unwrap();
+    let status = fixture
+        .cli()
+        .args(["status", "--session", &id, "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(status.status.code(), Some(5));
+    assert_eq!(body(&status)["error"]["code"], "corrupt_session");
+    let resumed = fixture
+        .cli()
+        .args([
+            "resume",
+            "--session",
+            &id,
+            "--operation-id",
+            "repair",
+            "--repair-tail",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(resumed.status.success(), "{resumed:?}");
+    assert_eq!(body(&resumed)["session"]["state"]["status"], "active");
+}
+
+#[test]
+fn schema_command_outputs_the_checked_in_schema() {
+    let fixture = Fixture::new();
+    let output = fixture.cli().arg("schema").output().unwrap();
+    assert!(output.status.success());
+    let expected: Value =
+        serde_json::from_str(include_str!("../../../schemas/session-v2.schema.json")).unwrap();
+    assert_eq!(body(&output), expected);
+    assert_eq!(fs::read_dir(&fixture.0).unwrap().count(), 0);
+}
