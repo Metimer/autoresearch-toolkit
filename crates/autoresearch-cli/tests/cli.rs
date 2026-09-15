@@ -352,3 +352,220 @@ fn schema_command_outputs_the_checked_in_schema() {
     assert_eq!(body(&output), expected);
     assert_eq!(fs::read_dir(&fixture.0).unwrap().count(), 0);
 }
+
+fn source_fixture(fixture: &Fixture) -> String {
+    let source = fixture.0.join("source");
+    fs::create_dir(&source).unwrap();
+    fs::create_dir(source.join("src")).unwrap();
+    fs::write(source.join("src/main.txt"), b"baseline\n").unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&source)
+            .args(args)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "Metimer")
+            .env("GIT_AUTHOR_EMAIL", "metinamerwane@gmail.com")
+            .env("GIT_COMMITTER_NAME", "Metimer")
+            .env("GIT_COMMITTER_EMAIL", "metinamerwane@gmail.com")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        output.stdout
+    };
+    run(&["init", "--template="]);
+    run(&["add", "--all"]);
+    run(&["commit", "-m", "source"]);
+    let commit = String::from_utf8(run(&["rev-parse", "HEAD"])).unwrap();
+    let mut config: Value =
+        serde_json::from_str(include_str!("../../../examples/session.json")).unwrap();
+    config["source"] = json!({"repository":"source", "commit":commit.trim()});
+    config["budget"]["deadline_unix_ms"] = json!(4_000_000_000_000_u64);
+    config["benchmark"]["executable"] = json!("/must-not-execute");
+    fs::write(
+        fixture.0.join("workspace.json"),
+        serde_json::to_vec(&config).unwrap(),
+    )
+    .unwrap();
+    config["session_id"].as_str().unwrap().into()
+}
+
+#[test]
+fn workspace_cli_builds_seals_and_exports_an_unevaluated_candidate() {
+    let fixture = Fixture::new();
+    let id = source_fixture(&fixture);
+    let run = |args: &[&str]| fixture.cli().args(args).arg("--json").output().unwrap();
+    assert!(run(&[
+        "init",
+        "--config",
+        "workspace.json",
+        "--operation-id",
+        "init"
+    ])
+    .status
+    .success());
+    let base = run(&[
+        "workspace",
+        "--session",
+        &id,
+        "--local-changes",
+        "exclude",
+        "--operation-id",
+        "workspace",
+    ]);
+    assert!(base.status.success(), "{base:?}");
+    assert_eq!(body(&base)["experiments_executed"], false);
+    let prepared = run(&[
+        "prepare-candidate",
+        "--session",
+        &id,
+        "--candidate",
+        "one",
+        "--hypothesis",
+        "less work",
+        "--operation-id",
+        "prepare",
+    ]);
+    assert!(prepared.status.success(), "{prepared:?}");
+    let candidate = PathBuf::from(body(&prepared)["artifact"]["path"].as_str().unwrap());
+    fs::write(candidate.join("src/main.txt"), b"candidate\n").unwrap();
+    let sealed = run(&[
+        "seal",
+        "--session",
+        &id,
+        "--candidate",
+        "one",
+        "--operation-id",
+        "seal",
+    ]);
+    assert!(sealed.status.success(), "{sealed:?}");
+    let exported = run(&[
+        "export-candidate",
+        "--session",
+        &id,
+        "--candidate",
+        "one",
+        "--output",
+        "bundle",
+        "--operation-id",
+        "export",
+    ]);
+    assert!(exported.status.success(), "{exported:?}");
+    assert_eq!(body(&exported)["artifact"]["evaluated"], false);
+    assert!(fixture.0.join("bundle/candidate.patch").is_file());
+    assert!(fixture.0.join("bundle/base/src/main.txt").is_file());
+    assert_eq!(
+        fs::read(fixture.0.join("source/src/main.txt")).unwrap(),
+        b"baseline\n"
+    );
+    let repeated = run(&[
+        "export-candidate",
+        "--session",
+        &id,
+        "--candidate",
+        "one",
+        "--output",
+        "bundle",
+        "--operation-id",
+        "export",
+    ]);
+    assert!(repeated.status.success());
+    assert_eq!(body(&repeated)["artifact"]["already_applied"], true);
+    let status = run(&["status", "--session", &id]);
+    assert_eq!(
+        body(&status)["session"]["state"]["artifacts"]
+            .as_object()
+            .unwrap()
+            .len(),
+        4
+    );
+}
+
+#[test]
+fn workspace_cli_requires_explicit_policy_and_rejects_invalid_options_and_scope() {
+    let fixture = Fixture::new();
+    let id = source_fixture(&fixture);
+    for args in [
+        vec!["workspace", "--session", &id, "--operation-id", "workspace"],
+        vec![
+            "workspace",
+            "--session",
+            &id,
+            "--local-changes",
+            "auto",
+            "--operation-id",
+            "workspace",
+        ],
+        vec!["seal", "--session", &id, "--operation-id", "seal"],
+        vec![
+            "prepare-candidate",
+            "--session",
+            &id,
+            "--candidate",
+            "one",
+            "--operation-id",
+            "prepare",
+        ],
+        vec![
+            "export-candidate",
+            "--session",
+            &id,
+            "--candidate",
+            "one",
+            "--operation-id",
+            "export",
+        ],
+        vec!["status", "--session", &id, "--output", "bad"],
+    ] {
+        let output = fixture.cli().args(args).arg("--json").output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(!fixture.0.join(".auto").exists());
+    }
+    let run = |args: &[&str]| fixture.cli().args(args).arg("--json").output().unwrap();
+    assert!(run(&[
+        "init",
+        "--config",
+        "workspace.json",
+        "--operation-id",
+        "init"
+    ])
+    .status
+    .success());
+    assert!(run(&[
+        "workspace",
+        "--session",
+        &id,
+        "--local-changes",
+        "exclude",
+        "--operation-id",
+        "workspace"
+    ])
+    .status
+    .success());
+    let candidate = run(&[
+        "prepare-candidate",
+        "--session",
+        &id,
+        "--candidate",
+        "one",
+        "--hypothesis",
+        "scope",
+        "--operation-id",
+        "prepare",
+    ]);
+    assert!(candidate.status.success());
+    let path = PathBuf::from(body(&candidate)["artifact"]["path"].as_str().unwrap());
+    fs::write(path.join("outside.txt"), b"forbidden").unwrap();
+    let sealed = run(&[
+        "seal",
+        "--session",
+        &id,
+        "--candidate",
+        "one",
+        "--operation-id",
+        "seal",
+    ]);
+    assert_eq!(sealed.status.code(), Some(8));
+    assert_eq!(body(&sealed)["error"]["code"], "scope_violation");
+}
