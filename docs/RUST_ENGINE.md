@@ -2,7 +2,7 @@
 
 The engine has two Cargo workspace members:
 
-- `autoresearch-core`: strict contracts, persistent session state and budget accounting.
+- `autoresearch-core`: contracts, persistent sessions, budget accounting and isolated snapshots.
 - `autoresearch-cli`: the `autoresearch` binary, with text and versioned JSON output.
 
 The workspace uses Rust 2021 and supports Rust 1.81 or later. `Cargo.lock` is
@@ -64,8 +64,9 @@ the session lock and cannot signal a running worker. Supervisors and cancellatio
 requests belong to the process execution implementation.
 
 The Python skills remain the operational optimization workflow. The Rust engine
-currently manages configuration and session metadata; it does not run checks,
-hooks, benchmarks, Git operations or result acceptance.
+manages configuration, session metadata and isolated Git snapshots. Workspace
+commands invoke bounded Git plumbing; they do not run project checks, hooks,
+benchmarks or result acceptance.
 
 ## Configuration version 2
 
@@ -97,10 +98,11 @@ from the Rust types after building:
 | `commit_policy` | `never` or `explicit`. |
 
 These policies are declarations for the future runner. In particular,
-`network: "disabled"` does not install a network sandbox. Repository identity,
-protected content, physical path containment, snapshot identity and local-change
-inclusion still require the repository implementation. Measurement ordering,
-cache handling, hooks, byte quotas and commit policy require execution support.
+`network: "disabled"` does not install a network sandbox. Workspace preparation
+now verifies local repository identity, the requested commit, protected hashes
+and supported paths. It records the captured snapshot and explicit local-change
+policy. Measurement ordering, cache handling, hooks, process quotas and commit
+policy still require execution support.
 
 Inputs are limited to 1 MiB. Serde rejects unknown and duplicate fields, including
 duplicate keys in hash and environment maps. Semantic validation produces a
@@ -133,8 +135,10 @@ as a session and there is no automatic garbage collection yet.
 
 The stable `lock` file has an exclusive OS advisory lock for the lifetime of
 `SessionGuard`. Another cooperating writer fails with `session_busy`. The OS
-releases the lock when the owner exits, including a forced termination. Lock
-files must not be deleted or replaced to recover a session. `status` also takes
+releases the lock when the owner exits, including a forced termination. Normal
+guard destruction explicitly unlocks it before closing the file, so a descriptor
+temporarily duplicated by concurrent process spawning cannot prolong ownership.
+Lock files must not be deleted or replaced to recover a session. `status` also takes
 this lock, so it returns busy while another process owns the guard.
 
 The journal is authoritative. Each strict, versioned event contains a sequence,
@@ -173,7 +177,8 @@ to 64 MiB, and each journal record to 16 KiB. Recovery backups are additional lo
 files; the future artifact quota and retention implementation must account for
 them. Owned directories reject symlinks; opened session files reject symlinks,
 hard links and non-regular files. New owned directories use mode 0700 and new
-session files 0600. The frozen configuration includes explicitly set environment
+metadata files 0600. Snapshot files use Git's normal 0644/0755 modes inside private
+directories. The frozen configuration includes explicitly set environment
 values, so keep credentials out of it.
 
 These guarantees target cooperating processes on a local filesystem. They do
@@ -183,6 +188,144 @@ guarantees. The hash chain detects corruption; it is not authentication or an
 external backup. Deleting both a journal suffix and its projection cannot be
 reliably detected without an external anchor. Process-death recovery is tested;
 power-loss behavior has not been qualified.
+
+## Independent workspaces and candidate exports
+
+Workspace commands require Git on PATH and a local non-bare source repository.
+They use configuration version 2 without changing it. `source.repository` is
+resolved relative to the pilot root selected with `--root`, not relative to the
+configuration file or a later invocation directory. The declared commit must
+exist and identify a commit object.
+
+```sh
+./target/debug/autoresearch workspace --session example-session \
+  --root /path/to/project --local-changes exclude --operation-id workspace-001 --json
+./target/debug/autoresearch prepare-candidate --session example-session \
+  --root /path/to/project --candidate trial-001 --hypothesis "Reduce repeated work" \
+  --operation-id prepare-001 --json
+# Edit only the candidate directory returned above.
+./target/debug/autoresearch seal --session example-session \
+  --root /path/to/project --candidate trial-001 --operation-id seal-001 --json
+./target/debug/autoresearch export-candidate --session example-session \
+  --root /path/to/project --candidate trial-001 --output /path/to/new-bundle \
+  --operation-id export-001 --json
+```
+
+Choose the local-change policy explicitly when creating the workspace:
+
+- `exclude`: capture the exact declared commit; staged, unstaged and untracked
+  changes do not enter the snapshot. A dirty source is allowed and remains intact.
+- `include`: require source HEAD to match the declared commit, then capture the
+  current bytes of tracked and non-ignored untracked files, including deletions.
+  This captures the working-tree view, not a separate staged/index version.
+  Ignored untracked files, generated paths and local `.auto/` state are excluded.
+  Two consecutive captures and a final HEAD check detect changes during capture.
+
+Pause source edits while capturing and candidate edits while sealing. The engine
+does not lock an editor; repeated scans cannot establish an atomic snapshot of a
+source that another process continuously rewrites.
+
+The engine reads source objects and file lists without refreshing its index. It
+builds a new bare Git object database from raw captured bytes, with no shared
+objects, hard links, alternates, worktree registration or remote. Only the selected
+snapshot is copied, not source commit history. `refs/autoresearch/base` points to
+its Git tree. Git objects are a local representation; the journal-bound manifest
+and verified snapshot files establish the baseline identity.
+
+Git invocation clears inherited Git configuration environment variables, disables
+system/global config, replacement objects, lazy fetching, hooks, fsmonitor,
+automatic maintenance and transport protocols. Raw blob ingestion bypasses
+filters; export disables external diff and text conversion. Each plumbing process
+has a 30-second timeout, bounded stdout/stderr and no implicit shell. This small
+Git wrapper is not the future supervisor for arbitrary project processes.
+
+The source's HEAD, index, refs, objects and user files are not changed by these
+operations. If the pilot root is also the source root, the explicitly owned
+`.auto/engine/` metadata is created there; use a separate pilot directory to keep
+all engine storage outside the source. No branch is committed or promoted.
+
+Published storage extends the session directory:
+
+```text
+artifacts/
+  workspace/
+    manifest.json
+    tree/                    # frozen initial snapshot
+    repository.git/          # independent Git object database
+  candidate-<id>/
+    manifest.json            # identity, hypothesis and baseline fingerprint
+    tree/                    # editable candidate, without .git
+  sealed-<id>/
+    manifest.json
+    tree/                    # copied, verified candidate snapshot
+  export-<operation-hash>/
+    manifest.json            # export receipt and reproduction fingerprints
+```
+
+A candidate ID contains 1–64 ASCII letters, digits, hyphens or underscores. Only
+one unsealed candidate can be prepared at a time. After sealing, a new candidate
+starts from the frozen initial baseline; accepted-reference promotion is not
+implemented yet. Baseline here means captured source, not a statistically
+qualified performance baseline. Candidate preparation does not reserve an
+experiment attempt or execute any configured command.
+
+At sealing, every added, deleted or modified file must lie in the allowed scope
+and outside protected paths. Protected files, including executable mode, must
+match the captured baseline; supplied protected SHA-256 values are checked at
+capture and sealing. Declared generated files are checked for unsafe filesystem
+entries, then omitted from the sealed code snapshot and patch. Generated paths
+cannot contain files tracked by the declared source commit.
+
+Snapshots support regular UTF-8 file paths, raw binary content and Git's executable
+bit. Symlinks (including internal links), hard-linked working files, submodules,
+special files, reserved `.git`/`.auto` components, traversal, case-colliding names,
+and unsupported path syntax are rejected. Decomposed combining-mark filenames
+are rejected conservatively; arbitrary cross-platform Unicode normalization is
+not supported. Empty directories, ACLs, ownership and non-Git permission bits are
+not preserved. These limits are checked before publishing a candidate snapshot.
+
+Sealing stores an independent copy and its SHA-256 inventory. Later edits to the
+editable candidate do not alter that copy. A changed frozen snapshot blocks reuse
+or export. There is no `kept` verdict, performance evidence or accepted-result
+promotion in this tranche.
+
+An export must target a new directory outside the source and Git/engine metadata.
+It contains `base/`, `candidate.patch`, `manifest.json` and reproduction instructions.
+The manifest anchors both the base inventory and patch hash. Every generated patch
+is applied to a temporary Git index and its resulting tree compared with the
+sealed tree before publication. Binary changes and executable modes are preserved;
+renames are represented as removal/addition pairs. An unchanged candidate has an
+empty patch. The supplied base makes reproduction independent of later source
+changes, even when local changes were included initially.
+
+The exported patch verifies code reproduction only. It does not verify behavior,
+performance or whether the candidate should be retained. Export is available
+while stopped or after the deadline; workspace creation, preparation and sealing
+require a non-stopped session with no reservation in flight and an unexpired
+deadline. The future runner will account for actual experiment stages.
+
+Artifact manifests are version 1 and limited to 4 MiB; snapshots are limited to
+4,096 files and the smaller of 64 MiB or the configured artifact budget. Filesystem
+walks have depth/entry limits. Publication checks total bytes under the session's
+artifact directory, including candidate copies and staged snapshots, against
+`max_artifact_bytes`. Each external bundle has the same byte ceiling separately.
+Temporary staging may consume bytes before that final check; this is not a live
+disk quota, and external bundles are not part of the session directory's cumulative
+limit. General retention, cleanup and process-output quotas remain future work.
+
+Artifacts are synchronized and published before their journal event. An operation
+retry can reconcile a fully published artifact after an uncertain journal append;
+it never silently regenerates a missing journaled artifact. Retrying preparation
+preserves the editable candidate. Export retries verify the existing bundle and
+will not overwrite another destination, even an empty one. Directory publication
+uses an exclusive destination reservation; interruption may leave `.building-*`,
+`.exporting-*`, a complete unjournaled artifact, or an empty destination reservation.
+Complete artifacts can be reconciled with the same request/operation ID. Partial
+staging or an empty reservation requires inspection; no automatic deletion occurs.
+
+Old metadata-only sessions remain readable: absent artifact projections default
+to an empty map. New artifact events require this engine version; older binaries
+will reject those events. Configuration version 2 itself is unchanged.
 
 ## Budget accounting
 
@@ -211,7 +354,10 @@ this is independent of configuration version 2. `schema` always emits the schema
 object itself. Session responses contain state, remaining budgets, deadline,
 clock/recovery/projection flags and `commands_executed: false`. Resume/stop also
 report `already_applied`. Configuration values are not echoed in parse errors or
-status output. Text errors go to stderr.
+status output. Workspace responses instead include `experiments_executed: false`
+and an `artifact` object with path, SHA-256, file count, retry status and
+`evaluated: false`. Session state lists journaled artifact fingerprints. Text
+errors go to stderr.
 
 | Code | Meaning |
 | --- | --- |
@@ -220,9 +366,10 @@ status output. Text errors go to stderr.
 | 2 | Invalid arguments, identifier or configuration. |
 | 3 | Unsupported session platform, or `doctor` could not find Git on a supported platform. |
 | 4 | Conflicting operation or session lock busy. |
-| 5 | Corrupt session, unsafe owned directory, storage limit or failed state projection. |
+| 5 | Corrupt session/artifact, unsafe path, storage limit or failed state projection. |
 | 6 | Attempt/time budget or original deadline exhausted. |
 | 7 | Clock moved backwards or outside the supported range. |
+| 8 | Git plumbing failed, source identity is invalid, or a snapshot violates file policy. |
 
 ## Checks and remaining work
 
@@ -236,19 +383,23 @@ node --test tests/legacy/jsonl.test.mjs
 
 The Rust suite covers structural and semantic validation, CLI invocations,
 operation retries, budget exhaustion, missing projections, corrupt journals,
-explicit tail repair, links and process death while holding a reservation. One
+explicit tail repair, links and process death while holding a reservation. Workspace
+tests compare all source files and Git metadata before/after operations, exercise
+dirty-file policies, protection checks, publication failures and exact patch
+reproduction, including binary content and executable modes. One
 ignored test is a subprocess fixture invoked by its parent test; it is exercised
 as part of the normal suite.
 
 Node.js 24 is needed only for characterization of the archived reader. The Rust
 binary needs neither Node.js nor Pi. CI defines Linux/macOS jobs for Rust 1.81 and
-stable, Python 3.10/3.13, plus a Node 24 job; remote execution remains unverified.
+stable, Python 3.10/3.13, plus a Node 24 job; remote execution remains unverified. This tranche was checked locally on macOS
+with Rust 1.81 and Git 2.47.0.
 
 The archive remains unchanged and is not imported automatically. Historical
 unknown outcomes and malformed records never become verified Rust results.
 See `THIRD_PARTY_NOTICES.md` for attribution.
 
-The next implementation is an independent experimental Git repository with
-source identity verification and enforced file policy, followed by process
-supervision. Baseline qualification, comparisons, acceptance and the Pi adapter
-follow those foundations. See `IMPLEMENTATION_PLAN.md` for the complete sequence.
+The next implementation is process supervision: declared environment, owned
+process groups, cancellation, timeouts, output and storage quotas, and accounting
+for multi-stage experiments. Baseline qualification, comparisons, acceptance and
+the Pi adapter follow that foundation. See `IMPLEMENTATION_PLAN.md` for the complete sequence.

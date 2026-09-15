@@ -119,9 +119,10 @@ Resuming the loop requires a new invocation.
 
 An agent-independent Rust engine provides strict configuration validation and
 persistent sessions with a journal, exclusive writer locks and budget accounting
-across restarts. Experiment execution, repository isolation and the Pi adapter
-are still planned. The portable skills above remain the available optimization
-workflow.
+across restarts. It can also create independent Git snapshots, prepare and seal
+scoped candidates, and export patches with verified reproduction. Experiment
+execution and the Pi adapter are still planned. The portable skills above remain
+the available optimization workflow.
 
 From a full source checkout, with Rust 1.81 or later:
 
@@ -149,6 +150,21 @@ To initialize and inspect metadata in an existing project directory:
 experiments yet. Repeating a mutation with the same operation ID does not repeat
 its effects; session budgets and the original deadline survive reopening.
 `autoresearch schema` prints the version 2 configuration schema.
+
+After replacing the example's placeholders with a real local repository and commit:
+
+```sh
+./target/debug/autoresearch workspace --session example-session \
+  --root /path/to/project --local-changes exclude --operation-id workspace-001 --json
+./target/debug/autoresearch prepare-candidate --session example-session \
+  --root /path/to/project --candidate trial-001 --hypothesis "Reduce repeated work" \
+  --operation-id prepare-001 --json
+```
+
+Edit the returned candidate directory, then use `seal` and `export-candidate` as
+described in the engine guide. `--local-changes exclude` starts from the declared
+commit; `include` explicitly captures current tracked and non-ignored untracked
+files. Exported candidates have not passed tests or performance measurements.
 
 See [Rust engine development](docs/RUST_ENGINE.md) for the configuration contract,
 commands, recovery procedure and storage guarantees. The existing skill bundles

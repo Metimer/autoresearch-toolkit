@@ -1,7 +1,8 @@
 # Plan d’implémentation — Autoresearch Toolkit
 
-Statut : architecture Rust retenue ; contrats v2 et sessions persistantes des lots
-1–2 implémentés. Isolation et exécution restent à réaliser ; voir `RUST_ENGINE.md`.
+Statut : contrats v2, sessions persistantes et isolation des candidats implémentés.
+Le lot 3 produit des snapshots scellés et des patches reproductibles ; la supervision
+et l’évaluation restent à réaliser. Voir `RUST_ENGINE.md`.
 Référence de départ : commit `130f305`, version du toolkit `0.1.0`.
 Responsable du projet et des nouvelles contributions : Metimer.
 
@@ -604,5 +605,39 @@ Les lots 0–2 ne représentent pas encore la boucle complète : caractérisatio
 autres fonctions reprises, identité physique du snapshot, coûts de qualification,
 révisions de méthode, preuves expérimentales et contrôle des descendants restent
 à intégrer aux lots suivants. Les commandes d’expérimentation du plan sont des
-interfaces cibles. Prochaine tranche : lot 3, dépôt Git expérimental indépendant,
-identité source et politique des fichiers ; puis lot 4, supervision de processus.
+interfaces cibles. Le lot 3 est désormais implémenté pour les snapshots de fichiers
+ordinaires, sans promotion de référence acceptée (qui dépend des mesures du lot 6).
+Prochaine tranche : lot 4, supervision de processus.
+
+### Avancement du lot 3 — Isolation et scellement
+
+- `workspace` vérifie la source et le commit ; choix obligatoire `--local-changes
+  exclude|include`, persisté dans le manifeste lié au journal. Le mode include capture
+  les fichiers courants suivis et non ignorés, sans modifier l’index source.
+- Dépôt Git bare indépendant, construit depuis les blobs capturés ; aucun objet,
+  index, worktree ou historique partagé avec la source. Snapshot initial identifié
+  par un manifeste SHA-256. La copie couvre le contenu sélectionné, pas l’historique.
+- `prepare-candidate` crée un dossier éditable depuis le snapshot initial ; un seul
+  candidat non scellé à la fois. `seal` contrôle les chemins, les empreintes protégées,
+  les types de fichiers et les modes, puis conserve une copie indépendante.
+- `export-candidate` publie dans un nouveau dossier un patch binaire, sa base et
+  leurs empreintes. Le patch est appliqué dans un index temporaire et le tree obtenu
+  doit correspondre au candidat scellé avant publication. Les renommages sont des
+  couples suppression/ajout ; le bit exécutable est conservé.
+- Reprises idempotentes, publication durable avant journal, refus des destinations
+  existantes et contrôle des snapshots figés à leur réutilisation.
+- Tests : source sale et métadonnées Git inchangées, filtres/fsmonitor non exécutés,
+  fichiers hors périmètre, liens, budgets de stockage, erreurs de projection et
+  journal, export après déplacement de la source, reproduction exacte et CLI.
+
+Périmètre actuel : fichiers ordinaires UTF-8, sans sous-modules ni liens symboliques,
+avec restrictions conservatrices sur les noms et collisions entre plateformes.
+Les répertoires vides, ACL et métadonnées non représentées par Git ne sont pas exportés.
+La copie scellée est protégée par vérification de contenu ; elle ne constitue pas
+un sandbox contre un programme exécuté sous le même compte système.
+
+L’export est explicitement non évalué. La qualification de référence, les métriques,
+la décision `kept` et la promotion du snapshot accepté attendent les lots 4–6.
+Les candidats suivants repartent donc actuellement du snapshot initial. Le lot 4
+raccordera les réservations aux étapes réelles et ajoutera supervision, annulation,
+quotas pendant exécution et contrôle des descendants.
