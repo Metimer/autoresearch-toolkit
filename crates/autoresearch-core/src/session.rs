@@ -4,7 +4,7 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fmt,
     fs::{self, File, OpenOptions},
     io::{Read, Write},
@@ -21,7 +21,7 @@ pub struct SessionError {
     pub message: String,
 }
 impl SessionError {
-    fn new(code: &'static str, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
@@ -68,6 +68,8 @@ pub struct SessionState {
     pub attempts_used: u32,
     pub active_ms_used: u64,
     pub in_flight: Option<Reservation>,
+    #[serde(default)]
+    pub artifacts: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -85,6 +87,10 @@ pub struct SessionView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum Event {
+    ArtifactPublished {
+        key: String,
+        sha256: String,
+    },
     Created {
         config_sha256: String,
     },
@@ -231,6 +237,7 @@ impl SessionStore {
                 attempts_used: 0,
                 active_ms_used: 0,
                 in_flight: None,
+                artifacts: BTreeMap::new(),
             },
             previous_hash: String::new(),
             operations: HashMap::new(),
@@ -326,7 +333,7 @@ impl SessionStore {
 /// Keep this guard for the entire future runner operation, not just the first write.
 pub struct SessionGuard {
     path: PathBuf,
-    _lock: File,
+    _lock: OwnedLock,
     config: ValidatedConfig,
     state: SessionState,
     previous_hash: String,
@@ -337,6 +344,53 @@ pub struct SessionGuard {
 }
 
 impl SessionGuard {
+    pub(crate) fn owned_path(&self) -> &Path {
+        &self.path
+    }
+    pub(crate) fn project_root(&self) -> &Path {
+        self.path
+            .ancestors()
+            .nth(4)
+            .expect("session under project root")
+    }
+    pub(crate) fn artifact_operation(&self, operation: &str, key: &str) -> Result<Option<String>> {
+        identifier(operation)?;
+        identifier(key)?;
+        if self.uncertain {
+            return Err(SessionError::new(
+                "corrupt_session",
+                "reopen after an uncertain journal write",
+            ));
+        }
+        match self.operations.get(operation) {
+            Some(Event::ArtifactPublished {
+                key: previous,
+                sha256,
+            }) if previous == key => Ok(Some(sha256.clone())),
+            Some(_) => Err(SessionError::new(
+                "conflict",
+                "operation ID already belongs to another operation",
+            )),
+            None => Ok(None),
+        }
+    }
+    pub(crate) fn publish_artifact(
+        &mut self,
+        operation: &str,
+        key: &str,
+        sha256: &str,
+        now: u64,
+    ) -> Result<bool> {
+        self.record(
+            operation,
+            now,
+            Event::ArtifactPublished {
+                key: key.into(),
+                sha256: sha256.into(),
+            },
+        )
+    }
+
     pub fn state(&self) -> &SessionState {
         &self.state
     }
@@ -536,6 +590,20 @@ fn apply(state: &mut SessionState, config: &SessionConfig, record: &Record) -> R
         ));
     }
     match &record.event {
+        Event::ArtifactPublished { key, sha256 } => {
+            identifier(key)?;
+            if sha256.len() != 64
+                || !sha256.bytes().all(|b| b.is_ascii_hexdigit())
+                || state.artifacts.contains_key(key)
+                || state.artifacts.len() >= 256
+            {
+                return Err(SessionError::new(
+                    "conflict",
+                    "invalid, duplicate or excessive artifact publication",
+                ));
+            }
+            state.artifacts.insert(key.clone(), sha256.clone());
+        }
         Event::Created { config_sha256 } => {
             if state.sequence != 0 || config_sha256 != &state.config_sha256 {
                 return Err(SessionError::new(
@@ -626,6 +694,7 @@ fn replay(config: &ValidatedConfig, bytes: &[u8]) -> Result<Replay> {
         attempts_used: 0,
         active_ms_used: 0,
         in_flight: None,
+        artifacts: BTreeMap::new(),
     };
     let mut previous = String::new();
     let mut operations = HashMap::new();
@@ -663,7 +732,7 @@ fn replay(config: &ValidatedConfig, bytes: &[u8]) -> Result<Replay> {
     Ok((state, previous, operations))
 }
 
-fn identifier(id: &str) -> Result<()> {
+pub(crate) fn identifier(id: &str) -> Result<()> {
     if id.is_empty()
         || id.len() > 128
         || !id
@@ -677,11 +746,11 @@ fn identifier(id: &str) -> Result<()> {
     }
     Ok(())
 }
-fn hash(bytes: &[u8]) -> String {
+pub(crate) fn hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-fn check_directory(path: &Path) -> Result<()> {
+pub(crate) fn check_directory(path: &Path) -> Result<()> {
     if !path.symlink_metadata()?.is_dir() {
         return Err(SessionError::new(
             "unsafe_path",
@@ -691,7 +760,7 @@ fn check_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn regular_open(path: &Path, append: bool) -> std::io::Result<File> {
+pub(crate) fn regular_open(path: &Path, append: bool) -> std::io::Result<File> {
     let mut options = OpenOptions::new();
     options.read(true).append(append);
     #[cfg(unix)]
@@ -719,7 +788,7 @@ fn regular_file(file: &File) -> std::io::Result<()> {
     }
     Ok(())
 }
-fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
+pub(crate) fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     let file = regular_open(path, false)?;
     if file.metadata()?.len() > limit as u64 {
         return Err(SessionError::new(
@@ -737,7 +806,16 @@ fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     }
     Ok(bytes)
 }
-fn acquire(path: &Path, create: bool) -> Result<File> {
+struct OwnedLock(File);
+impl Drop for OwnedLock {
+    fn drop(&mut self) {
+        // Explicitly unlock before close: concurrent fork/spawn may temporarily
+        // duplicate this open file description before CLOEXEC takes effect.
+        let _ = FileExt::unlock(&self.0);
+    }
+}
+
+fn acquire(path: &Path, create: bool) -> Result<OwnedLock> {
     let mut options = OpenOptions::new();
     options
         .read(true)
@@ -760,9 +838,9 @@ fn acquire(path: &Path, create: bool) -> Result<File> {
             e.into()
         }
     })?;
-    Ok(file)
+    Ok(OwnedLock(file))
 }
-fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
@@ -792,7 +870,7 @@ fn atomic_replace(path: &Path, bytes: &[u8]) -> Result<()> {
         .map_err(|e| SessionError::from(e.error))?;
     sync_directory(parent)
 }
-fn sync_directory(path: &Path) -> Result<()> {
+pub(crate) fn sync_directory(path: &Path) -> Result<()> {
     File::open(path)?.sync_all().map_err(Into::into)
 }
 
@@ -812,4 +890,24 @@ fn projection_matches(path: &Path, state: &SessionState) -> Result<bool> {
         ));
     }
     Ok(cached.as_ref() == Some(state))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dropping_guard_releases_lock_even_with_a_duplicated_descriptor() {
+        let root = tempfile::tempdir().unwrap();
+        let config =
+            ValidatedConfig::from_json(include_bytes!("../../../examples/session.json")).unwrap();
+        let store = SessionStore::new(root.path()).unwrap();
+        let guard = store.init(config, "init", 1).unwrap();
+        // Models the descriptor that a concurrently forked child may retain until exec.
+        let duplicate = guard._lock.0.try_clone().unwrap();
+        drop(guard);
+        let reopened = store.open("example-session", false).unwrap();
+        drop(duplicate);
+        assert_eq!(reopened.state().sequence, 1);
+    }
 }
