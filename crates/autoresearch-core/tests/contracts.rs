@@ -21,7 +21,7 @@ fn example_roundtrips_and_validated_config_has_read_only_access() {
 #[test]
 fn rejects_invalid_contracts_without_favorable_defaults() {
     let cases = [
-        ("/schema_version", json!(2)),
+        ("/schema_version", json!(999)),
         ("/schema_version", json!(-1)),
         ("/session_id", json!("../escape")),
         ("/goal", json!(" ")),
@@ -82,8 +82,8 @@ fn rejects_unknown_missing_and_duplicate_fields() {
     missing.as_object_mut().unwrap().remove("checks");
     assert!(!check(missing));
     let duplicate = EXAMPLE.replacen(
-        "\"schema_version\": 1",
-        "\"schema_version\": 1, \"schema_version\": 1",
+        "\"schema_version\": 2",
+        "\"schema_version\": 2, \"schema_version\": 2",
         1,
     );
     assert!(ValidatedConfig::from_json(duplicate.as_bytes()).is_err());

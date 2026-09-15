@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "session_id": "example-session",
   "goal": "Reduce the duration of a measured workload without changing behavior",
   "source": {
@@ -7,11 +7,36 @@
     "commit": "0000000000000000000000000000000000000000"
   },
   "scope": {
-    "allowed_paths": ["src/"],
-    "protected_paths": ["tests/", "Cargo.toml", "Cargo.lock"]
+    "allowed_paths": [
+      "src/"
+    ],
+    "protected_paths": [
+      "tests/",
+      "Cargo.toml",
+      "Cargo.lock"
+    ],
+    "protected_sha256": {},
+    "generated_paths": [
+      "build/"
+    ]
   },
-  "checks": [{"executable": "cargo", "args": ["test", "--locked"], "cwd": "."}],
-  "benchmark": {"executable": "python3", "args": ["benchmarks/run.py"], "cwd": "."},
+  "checks": [
+    {
+      "executable": "cargo",
+      "args": [
+        "test",
+        "--locked"
+      ],
+      "cwd": "."
+    }
+  ],
+  "benchmark": {
+    "executable": "python3",
+    "args": [
+      "benchmarks/run.py"
+    ],
+    "cwd": "."
+  },
   "metric": {
     "name": "bench_ms",
     "unit": "ms",
@@ -19,7 +44,20 @@
     "domain": "positive",
     "minimum_improvement": 1.0
   },
-  "sampling": {"runs": 5, "warmup": 1},
+  "sampling": {
+    "runs": 5,
+    "warmup": 1,
+    "baseline_rounds": 3,
+    "order": "balanced",
+    "cache": {
+      "mode": "none",
+      "paths": []
+    },
+    "input_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "seeds": [
+      42
+    ]
+  },
   "budget": {
     "max_experiments": 5,
     "active_seconds": 1200,
@@ -27,5 +65,21 @@
     "deadline_unix_ms": 1893456000000,
     "max_output_bytes": 1048576,
     "max_artifact_bytes": 104857600
-  }
+  },
+  "execution": {
+    "environment": {
+      "inherit": [
+        "PATH"
+      ],
+      "set": {}
+    },
+    "network": "disabled",
+    "setup": [],
+    "hooks": {
+      "before": [],
+      "after": []
+    }
+  },
+  "secondary_constraints": [],
+  "commit_policy": "never"
 }

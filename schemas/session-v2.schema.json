@@ -1,0 +1,508 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SessionConfig",
+  "type": "object",
+  "required": [
+    "benchmark",
+    "budget",
+    "checks",
+    "commit_policy",
+    "execution",
+    "goal",
+    "metric",
+    "sampling",
+    "schema_version",
+    "scope",
+    "secondary_constraints",
+    "session_id",
+    "source"
+  ],
+  "properties": {
+    "benchmark": {
+      "$ref": "#/definitions/CommandSpec"
+    },
+    "budget": {
+      "$ref": "#/definitions/Budget"
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/CommandSpec"
+      },
+      "maxItems": 64,
+      "minItems": 1
+    },
+    "commit_policy": {
+      "$ref": "#/definitions/CommitPolicy"
+    },
+    "execution": {
+      "$ref": "#/definitions/ExecutionPolicy"
+    },
+    "goal": {
+      "type": "string",
+      "maxLength": 4096,
+      "minLength": 1
+    },
+    "metric": {
+      "$ref": "#/definitions/Metric"
+    },
+    "sampling": {
+      "$ref": "#/definitions/Sampling"
+    },
+    "schema_version": {
+      "type": "integer",
+      "format": "uint32",
+      "maximum": 2.0,
+      "minimum": 2.0
+    },
+    "scope": {
+      "$ref": "#/definitions/Scope"
+    },
+    "secondary_constraints": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/SecondaryConstraint"
+      },
+      "maxItems": 32
+    },
+    "session_id": {
+      "type": "string",
+      "maxLength": 64,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "source": {
+      "$ref": "#/definitions/Source"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Budget": {
+      "type": "object",
+      "required": [
+        "active_seconds",
+        "command_timeout_seconds",
+        "deadline_unix_ms",
+        "max_artifact_bytes",
+        "max_experiments",
+        "max_output_bytes"
+      ],
+      "properties": {
+        "active_seconds": {
+          "type": "integer",
+          "format": "uint64",
+          "maximum": 1.844674407370955e16,
+          "minimum": 1.0
+        },
+        "command_timeout_seconds": {
+          "type": "integer",
+          "format": "uint64",
+          "maximum": 1.844674407370955e16,
+          "minimum": 1.0
+        },
+        "deadline_unix_ms": {
+          "type": "integer",
+          "format": "uint64",
+          "maximum": 9.223372036854776e18,
+          "minimum": 1.0
+        },
+        "max_artifact_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 1.0
+        },
+        "max_experiments": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "max_output_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 1.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "CacheMode": {
+      "type": "string",
+      "enum": [
+        "cold",
+        "warm",
+        "none"
+      ]
+    },
+    "CachePolicy": {
+      "type": "object",
+      "required": [
+        "mode",
+        "paths"
+      ],
+      "properties": {
+        "mode": {
+          "$ref": "#/definitions/CacheMode"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "CommandSpec": {
+      "type": "object",
+      "required": [
+        "args",
+        "cwd",
+        "executable"
+      ],
+      "properties": {
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 4096
+        },
+        "cwd": {
+          "type": "string"
+        },
+        "executable": {
+          "type": "string",
+          "maxLength": 4096,
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "CommitPolicy": {
+      "type": "string",
+      "enum": [
+        "never",
+        "explicit"
+      ]
+    },
+    "ConstraintBound": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "at_most"
+              ]
+            },
+            "value": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "at_least"
+              ]
+            },
+            "value": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "Direction": {
+      "type": "string",
+      "enum": [
+        "lower",
+        "higher"
+      ]
+    },
+    "Environment": {
+      "type": "object",
+      "required": [
+        "inherit",
+        "set"
+      ],
+      "properties": {
+        "inherit": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "set": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExecutionPolicy": {
+      "type": "object",
+      "required": [
+        "environment",
+        "hooks",
+        "network",
+        "setup"
+      ],
+      "properties": {
+        "environment": {
+          "$ref": "#/definitions/Environment"
+        },
+        "hooks": {
+          "$ref": "#/definitions/Hooks"
+        },
+        "network": {
+          "$ref": "#/definitions/NetworkPolicy"
+        },
+        "setup": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CommandSpec"
+          },
+          "maxItems": 64
+        }
+      },
+      "additionalProperties": false
+    },
+    "Hooks": {
+      "type": "object",
+      "required": [
+        "after",
+        "before"
+      ],
+      "properties": {
+        "after": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CommandSpec"
+          },
+          "maxItems": 64
+        },
+        "before": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CommandSpec"
+          },
+          "maxItems": 64
+        }
+      },
+      "additionalProperties": false
+    },
+    "Metric": {
+      "type": "object",
+      "required": [
+        "direction",
+        "domain",
+        "minimum_improvement",
+        "name",
+        "unit"
+      ],
+      "properties": {
+        "direction": {
+          "$ref": "#/definitions/Direction"
+        },
+        "domain": {
+          "$ref": "#/definitions/MetricDomain"
+        },
+        "minimum_improvement": {
+          "description": "Smallest useful improvement in the declared unit, not a percentage.",
+          "type": "number",
+          "format": "double"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+        },
+        "unit": {
+          "type": "string",
+          "maxLength": 32
+        }
+      },
+      "additionalProperties": false
+    },
+    "MetricDomain": {
+      "type": "string",
+      "enum": [
+        "positive",
+        "non_negative",
+        "finite"
+      ]
+    },
+    "NetworkPolicy": {
+      "type": "string",
+      "enum": [
+        "disabled",
+        "allowed"
+      ]
+    },
+    "SampleOrder": {
+      "type": "string",
+      "enum": [
+        "balanced"
+      ]
+    },
+    "Sampling": {
+      "type": "object",
+      "required": [
+        "baseline_rounds",
+        "cache",
+        "input_sha256",
+        "order",
+        "runs",
+        "seeds",
+        "warmup"
+      ],
+      "properties": {
+        "baseline_rounds": {
+          "type": "integer",
+          "format": "uint32",
+          "maximum": 31.0,
+          "minimum": 3.0
+        },
+        "cache": {
+          "$ref": "#/definitions/CachePolicy"
+        },
+        "input_sha256": {
+          "type": "string",
+          "pattern": "^[A-Fa-f0-9]{64}$"
+        },
+        "order": {
+          "$ref": "#/definitions/SampleOrder"
+        },
+        "runs": {
+          "type": "integer",
+          "format": "uint32",
+          "maximum": 31.0,
+          "minimum": 3.0
+        },
+        "seeds": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "maxItems": 1024
+        },
+        "warmup": {
+          "type": "integer",
+          "format": "uint32",
+          "maximum": 31.0,
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Scope": {
+      "type": "object",
+      "required": [
+        "allowed_paths",
+        "generated_paths",
+        "protected_paths",
+        "protected_sha256"
+      ],
+      "properties": {
+        "allowed_paths": {
+          "description": "Relative literal paths: a trailing slash denotes a directory prefix.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 1024,
+          "minItems": 1
+        },
+        "generated_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 1024
+        },
+        "protected_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 1024
+        },
+        "protected_sha256": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "SecondaryConstraint": {
+      "type": "object",
+      "required": [
+        "bound",
+        "domain",
+        "name",
+        "unit"
+      ],
+      "properties": {
+        "bound": {
+          "$ref": "#/definitions/ConstraintBound"
+        },
+        "domain": {
+          "$ref": "#/definitions/MetricDomain"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+        },
+        "unit": {
+          "type": "string",
+          "maxLength": 32
+        }
+      },
+      "additionalProperties": false
+    },
+    "Source": {
+      "type": "object",
+      "required": [
+        "commit",
+        "repository"
+      ],
+      "properties": {
+        "commit": {
+          "type": "string",
+          "pattern": "^([A-Fa-f0-9]{40}|[A-Fa-f0-9]{64})$"
+        },
+        "repository": {
+          "type": "string",
+          "maxLength": 4096,
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
