@@ -117,10 +117,11 @@ Resuming the loop requires a new invocation.
 
 ### Rust engine
 
-An agent-independent Rust engine is under development. The first slice provides
-strict configuration validation and a diagnostic CLI. Experiment execution,
-persistence, isolation, and the Pi adapter are still planned. The portable skills
-above remain the available optimization workflow.
+An agent-independent Rust engine provides strict configuration validation and
+persistent sessions with a journal, exclusive writer locks and budget accounting
+across restarts. Experiment execution, repository isolation and the Pi adapter
+are still planned. The portable skills above remain the available optimization
+workflow.
 
 From a full source checkout, with Rust 1.81 or later:
 
@@ -135,8 +136,23 @@ it does not verify the repository or execute the declared commands. The Rust
 binary runs without Node.js or a Pi installation. Building it may download the
 dependencies recorded in `Cargo.lock`.
 
-Development details are in `docs/RUST_ENGINE.md` in the source repository.
-The existing skill bundles do not include the Rust sources or binary.
+To initialize and inspect metadata in an existing project directory:
+
+```sh
+./target/debug/autoresearch init --config examples/session.json \
+  --root /path/to/project --operation-id create-001 --json
+./target/debug/autoresearch status --session example-session \
+  --root /path/to/project --json
+```
+
+`resume` and `stop` persist session transitions. They do not launch or cancel
+experiments yet. Repeating a mutation with the same operation ID does not repeat
+its effects; session budgets and the original deadline survive reopening.
+`autoresearch schema` prints the version 2 configuration schema.
+
+See [Rust engine development](docs/RUST_ENGINE.md) for the configuration contract,
+commands, recovery procedure and storage guarantees. The existing skill bundles
+do not include the Rust sources or binary.
 
 ### Checks
 

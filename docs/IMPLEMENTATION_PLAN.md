@@ -1,7 +1,7 @@
 # Plan d’implémentation — Autoresearch Toolkit
 
-Statut : architecture Rust retenue ; première tranche des lots 0–1 implémentée.
-La boucle moteur et les lots suivants restent à réaliser ; voir `RUST_ENGINE.md`.
+Statut : architecture Rust retenue ; contrats v2 et sessions persistantes des lots
+1–2 implémentés. Isolation et exécution restent à réaliser ; voir `RUST_ENGINE.md`.
 Référence de départ : commit `130f305`, version du toolkit `0.1.0`.
 Responsable du projet et des nouvelles contributions : Metimer.
 
@@ -197,7 +197,7 @@ restent des documents de travail ; les contrats structurés font autorité.
 session.json                 # contrat et identité
 events.jsonl                 # événements séquencés, append-only
 state.json                   # projection reconstruisible
-lock/                        # propriétaire, nonce, identité du processus
+lock                         # fichier stable avec verrou consultatif du système
 control/                     # demandes d’arrêt adressées au superviseur
 artifacts/<hash>/            # patches, snapshots, résultats bornés
 experiments/<id>/            # manifeste et preuves de chaque essai
@@ -206,8 +206,10 @@ workspaces/                  # dépôt expérimental et candidats possédés
 
 - Un rédacteur par session ; un verrou distinct empêche deux benchmarks simultanés
   dans le même groupe de ressources de mesure.
-- Acquisition atomique, identifiant aléatoire, hôte, PID et identité de démarrage.
-  Un PID seul ne suffit pas à prouver qu’un verrou est périmé.
+- Verrou de session consultatif du système, conservé pendant toute l’opération ;
+  libération automatique à la mort du processus. Ne jamais supprimer son fichier
+  pour forcer une reprise. Le futur superviseur devra aussi établir l’identité des
+  processus enfants ; un PID seul ne prouve pas qu’un processus est le bon.
 - Les requêtes d’arrêt sont écrites atomiquement et consommées par le superviseur,
   y compris entre deux échantillons. Aucun service permanent n’est nécessaire.
 - Écrire les artefacts avant l’événement qui les référence ; synchroniser le journal
@@ -571,17 +573,36 @@ La première version complète est prête lorsque :
 7. La version candidate contient documentation, versions compatibles, licences,
    attributions et notes de migration ; ses paquets sont testés après fabrication.
 
-### Avancement de la première tranche Rust
+### Avancement des contrats et sessions Rust
 
-- Workspace Cargo, crates core/cli, lockfile et compatibilité Rust 1.81 en place.
-- Contrat initial strict, validateurs sémantiques et commande `validate` en lecture seule.
-- `doctor` décrit les capacités réellement présentes et recherche Git sur PATH.
-- Six tests de caractérisation du lecteur JSONL archivé et notice d’attribution.
-- Seize tests Rust initiaux ; les 23 tests Python existants restent verts.
+- Workspace core/cli, lockfile et compatibilité Rust 1.81 en place.
+- Contrat v2 : environnement, réseau déclaré, setup/hooks, cache, empreintes,
+  contraintes secondaires et politique de commits explicites.
+- Schéma Draft 7 généré depuis les types, versionné et comparé en tests ; tests de
+  concordance structurelle et règles sémantiques supplémentaires clairement séparés.
+- Sessions : configuration figée, journal séquencé avec chaîne de hashes,
+  projections atomiques, verrou système, opérations idempotentes et reprise explicite
+  d’une dernière ligne incomplète conservée pour inspection.
+- Budgets : réservation durable, clôture par le futur runner de confiance,
+  consommation conservée après interruption, échéance initiale immuable.
+- CLI disponible : `doctor`, `validate`, `schema`, `init`, `status`, `resume`, `stop`.
+  Les mutations nécessitent `--operation-id` ; `--root` choisit le projet pilote.
+- Tests de deux processus concurrents, arrêt forcé, corruption, erreurs de projection,
+  budgets, liens et commandes CLI séparées. Les tests Python et de caractérisation
+  du lecteur JSONL archivé restent conservés.
 - Workflow CI défini ; exécution distante et autres plateformes encore à vérifier.
 
-Les lots 0–1 ne sont pas déclarés entièrement terminés : caractérisation des autres
-fonctions reprises, contrat complet, génération du schéma et parité restent à faire.
-Les commandes d’expérimentation de ce plan restent des interfaces cibles.
-Prochaine étape : compléter les contrats, puis le journal, les transitions et
-les budgets du lot 2. La boucle du moteur Rust n’est pas encore opérationnelle.
+L’état actuel se limite à `created`, `active`, `stopped` et un indicateur de
+réservation à réconcilier. Les états de qualification, de candidat et d’acceptation
+restent des cibles. `resume` active les métadonnées sans lancer d’expérience ;
+`stop` n’envoie pas encore de signal à un superviseur. Le journal actuel est borné
+à 64 Mio ; les sauvegardes de récupération et futurs artefacts nécessiteront une
+politique de rétention. Une réservation consomme actuellement une tentative ;
+la comptabilité des expériences à plusieurs étapes sera raccordée au runner.
+
+Les lots 0–2 ne représentent pas encore la boucle complète : caractérisation des
+autres fonctions reprises, identité physique du snapshot, coûts de qualification,
+révisions de méthode, preuves expérimentales et contrôle des descendants restent
+à intégrer aux lots suivants. Les commandes d’expérimentation du plan sont des
+interfaces cibles. Prochaine tranche : lot 3, dépôt Git expérimental indépendant,
+identité source et politique des fichiers ; puis lot 4, supervision de processus.
