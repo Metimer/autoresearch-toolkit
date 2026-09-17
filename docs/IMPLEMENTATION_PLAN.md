@@ -1,8 +1,9 @@
 # Plan d’implémentation — Autoresearch Toolkit
 
-Statut : contrats v2, sessions persistantes et isolation des candidats implémentés.
-Le lot 3 produit des snapshots scellés et des patches reproductibles ; la supervision
-et l’évaluation restent à réaliser. Voir `RUST_ENGINE.md`.
+Statut : lots 0–6 implémentés pour une exécution locale de confiance sur POSIX.
+Supervision, qualification, comparaisons confirmées et promotion atomique sont
+disponibles. Prochaine tranche : intégration CLI/skills (lot 7). Les limites
+d’isolation, de quotas et de preuve sont détaillées dans `RUST_ENGINE.md`.
 Référence de départ : commit `130f305`, version du toolkit `0.1.0`.
 Responsable du projet et des nouvelles contributions : Metimer.
 
@@ -52,8 +53,8 @@ Les constats constituent une lecture ciblée, pas une certification du moteur ar
   `Cargo.lock` est versionné ; la CI couvre ce minimum et Rust stable. L’augmentation
   du minimum demande une décision explicite et une mise à jour de compatibilité.
 - Première tranche : Serde/serde_json pour les contrats, sans runtime asynchrone.
-  Le choix du runner synchrone ou asynchrone sera évalué au lot 4 sur les besoins
-  réels d’annulation et de drainage des sorties ; pas d’ajout implicite de dépendances.
+  Le lot 4 utilise un runner synchrone avec flux non bloquants, rustix pour les
+  groupes POSIX et signal-hook pour SIGINT/SIGTERM ; aucun runtime asynchrone.
 - Adaptateur Pi léger en TypeScript, dans `adapters/pi/`, communiquant avec le
   binaire par requêtes et événements JSON versionnés. Aucun binding natif/FFI
   nécessaire et aucune logique d’acceptation dupliquée dans cet adaptateur.
@@ -593,21 +594,11 @@ La première version complète est prête lorsque :
   du lecteur JSONL archivé restent conservés.
 - Workflow CI défini ; exécution distante et autres plateformes encore à vérifier.
 
-L’état actuel se limite à `created`, `active`, `stopped` et un indicateur de
-réservation à réconcilier. Les états de qualification, de candidat et d’acceptation
-restent des cibles. `resume` active les métadonnées sans lancer d’expérience ;
-`stop` n’envoie pas encore de signal à un superviseur. Le journal actuel est borné
-à 64 Mio ; les sauvegardes de récupération et futurs artefacts nécessiteront une
-politique de rétention. Une réservation consomme actuellement une tentative ;
-la comptabilité des expériences à plusieurs étapes sera raccordée au runner.
-
-Les lots 0–2 ne représentent pas encore la boucle complète : caractérisation des
-autres fonctions reprises, identité physique du snapshot, coûts de qualification,
-révisions de méthode, preuves expérimentales et contrôle des descendants restent
-à intégrer aux lots suivants. Les commandes d’expérimentation du plan sont des
-interfaces cibles. Le lot 3 est désormais implémenté pour les snapshots de fichiers
-ordinaires, sans promotion de référence acceptée (qui dépend des mesures du lot 6).
-Prochaine tranche : lot 4, supervision de processus.
+Le socle conserve les états `created`, `active`, `stopped`. Les lots suivants
+ajoutent des projections distinctes pour l’exécution, la qualification et la
+référence acceptée. Le journal est borné à 64 Mio ; les sauvegardes et preuves
+restent conservées sans nettoyage automatique. Les commandes d’expérimentation
+initialement cibles sont désormais disponibles dans les limites documentées.
 
 ### Avancement du lot 3 — Isolation et scellement
 
@@ -617,7 +608,7 @@ Prochaine tranche : lot 4, supervision de processus.
 - Dépôt Git bare indépendant, construit depuis les blobs capturés ; aucun objet,
   index, worktree ou historique partagé avec la source. Snapshot initial identifié
   par un manifeste SHA-256. La copie couvre le contenu sélectionné, pas l’historique.
-- `prepare-candidate` crée un dossier éditable depuis le snapshot initial ; un seul
+- `prepare-candidate` crée un dossier éditable depuis la référence acceptée (initiale au départ) ; un seul
   candidat non scellé à la fois. `seal` contrôle les chemins, les empreintes protégées,
   les types de fichiers et les modes, puis conserve une copie indépendante.
 - `export-candidate` publie dans un nouveau dossier un patch binaire, sa base et
@@ -636,8 +627,47 @@ Les répertoires vides, ACL et métadonnées non représentées par Git ne sont 
 La copie scellée est protégée par vérification de contenu ; elle ne constitue pas
 un sandbox contre un programme exécuté sous le même compte système.
 
-L’export est explicitement non évalué. La qualification de référence, les métriques,
-la décision `kept` et la promotion du snapshot accepté attendent les lots 4–6.
-Les candidats suivants repartent donc actuellement du snapshot initial. Le lot 4
-raccordera les réservations aux étapes réelles et ajoutera supervision, annulation,
-quotas pendant exécution et contrôle des descendants.
+L’export certifie la reproduction du code, sans embarquer les preuves d’évaluation.
+La décision liée au candidat reste dans le journal et son rapport ; les bundles
+complets de résultats relèvent du lot 10.
+
+### Avancement des lots 4–6 — Exécution et décision
+
+- Superviseur argv sans shell implicite, environnement déclaré, HOME/TMPDIR privés,
+  groupes POSIX, sorties bornées et annulation via SIGINT/SIGTERM ou `stop`.
+  TERM puis KILL, drainage sans thread bloqué par un descendant, identité du groupe
+  conservée jusqu’au dernier signal. Après crash, aucun PID persistant n’est tué
+  automatiquement ; un groupe encore présent bloque la reprise.
+- Une tentative par évaluation de candidat ; toutes les étapes réservent du temps
+  avant lancement et débitent la durée monotone des processus, nettoyage inclus.
+  Qualification, setup, hooks, checks, warmups et confirmation consomment du temps.
+  Une réservation abandonnée reste débitée. Copie et hashing ne sont pas comptés
+  dans ce budget de temps des processus.
+- Protocole strict `METRIC {"name":"…","value":…,"unit":"…"}` avec métriques
+  secondaires obligatoires, valeurs finies, domaines, unités et doublons contrôlés.
+  Référence qualifiée sur plusieurs séries à code constant ; bruit défini par
+  l’étendue observée. Au moins cinq paires alternées, marge explicite et une série
+  de confirmation distincte avant `kept`. Pas de prétention de confiance statistique.
+- Caches privés froids/chauds, warmups exclus des résumés, graines appariées et
+  verrou local au projet pilote. Empreinte de la configuration, de l’environnement
+  déclaré et des exécutables externes directs ; une dérive de référence constatée
+  invalide sa qualification. L’identité des entrées reste déclarative.
+- Exécution sur copies des snapshots scellés ; contrôle du périmètre avant/après,
+  checks obligatoires et contrôle final. Rapports, sorties et métriques conservés.
+  Un événement durable lie rapport et décision et promeut la référence acceptée.
+  Les prochains candidats en repartent. Reprise sans réexécution d’un résultat
+  terminé, y compris après écriture du rapport avant l’événement de décision.
+- CLI `baseline` et `evaluate` utilisables sans Pi ni agent ; `stop` peut demander
+  l’arrêt d’un superviseur détenant le verrou. JSON et README anglais documentés.
+  La mise à jour des skills et l’élargissement de la CLI restent au lot 7.
+- Tests : référence bruitée, amélioration puis régression, contraintes secondaires,
+  confirmation échouée, modification interdite, quotas, caches, reprise de preuve,
+  projection manquante, arrêt CLI/SIGTERM et descendants résistant à TERM.
+
+Limites assumées : exécution de confiance, pas de sandbox système. `network=disabled`
+est refusé tant qu’un backend isolé manque. Le stockage est surveillé périodiquement
+et peut dépasser temporairement sa limite ; ce n’est pas un quota disque OS.
+Les groupes échappés, dépendances transitives et fichiers externes ne sont pas
+isolés. Les tests sont vérifiés localement sur macOS ; la matrice CI distante reste
+à exécuter après création du dépôt distant. Aucun commit n’est créé dans la source
+optimisée, et les archives tierces conservent leurs licences.

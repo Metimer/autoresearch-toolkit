@@ -120,9 +120,10 @@ Resuming the loop requires a new invocation.
 An agent-independent Rust engine provides strict configuration validation and
 persistent sessions with a journal, exclusive writer locks and budget accounting
 across restarts. It can also create independent Git snapshots, prepare and seal
-scoped candidates, and export patches with verified reproduction. Experiment
-execution and the Pi adapter are still planned. The portable skills above remain
-the available optimization workflow.
+scoped candidates, supervise commands, qualify a reference and compare candidates
+with a separate confirmation series. Verified improvements become the next
+reference; patches can be exported without committing to the source repository.
+The Pi adapter is still planned. The skills above currently use the portable workflow.
 
 From a full source checkout, with Rust 1.81 or later:
 
@@ -146,8 +147,8 @@ To initialize and inspect metadata in an existing project directory:
   --root /path/to/project --json
 ```
 
-`resume` and `stop` persist session transitions. They do not launch or cancel
-experiments yet. Repeating a mutation with the same operation ID does not repeat
+`resume` restores session metadata without launching commands. `stop` requests
+cancellation when an evaluation is running, or records a stopped session otherwise. Repeating a mutation with the same operation ID does not repeat
 its effects; session budgets and the original deadline survive reopening.
 `autoresearch schema` prints the version 2 configuration schema.
 
@@ -161,10 +162,34 @@ After replacing the example's placeholders with a real local repository and comm
   --operation-id prepare-001 --json
 ```
 
-Edit the returned candidate directory, then use `seal` and `export-candidate` as
-described in the engine guide. `--local-changes exclude` starts from the declared
-commit; `include` explicitly captures current tracked and non-ignored untracked
-files. Exported candidates have not passed tests or performance measurements.
+For execution, set `execution.network` to `"allowed"` only for trusted local
+commands, and configure their environment and generated paths explicitly. The
+current runner rejects `"disabled"` because it has no network isolation backend.
+Your benchmark must emit one JSON line per declared metric, for example:
+
+```text
+METRIC {"name":"bench_ms","value":12.4,"unit":"ms"}
+```
+
+This strict engine protocol differs from the portable measurement helper's output.
+Qualify the reference, edit the returned candidate directory, seal it, then evaluate:
+
+```sh
+./target/debug/autoresearch baseline --session example-session \
+  --root /path/to/project --operation-id baseline-001 --json
+./target/debug/autoresearch seal --session example-session \
+  --root /path/to/project --candidate trial-001 --operation-id seal-001 --json
+./target/debug/autoresearch evaluate --session example-session \
+  --root /path/to/project --candidate trial-001 --operation-id evaluate-001 --json
+```
+
+Read `evaluation.report.decision`: `kept` requires passing checks, sufficient gain
+and a distinct confirmation series. A completed evaluation can also be `discarded`,
+`inconclusive`, `failed` or `cancelled`. Exit zero means the operation completed,
+so automation must inspect the decision. Use `export-candidate` as described in
+the engine guide to export code; evaluation evidence remains in the session.
+`--local-changes exclude` starts from the declared commit; `include` explicitly captures current tracked and non-ignored untracked
+files. A code export alone does not certify that a candidate passed evaluation.
 
 See [Rust engine development](docs/RUST_ENGINE.md) for the configuration contract,
 commands, recovery procedure and storage guarantees. The existing skill bundles

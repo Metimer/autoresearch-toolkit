@@ -2,7 +2,7 @@
 
 The engine has two Cargo workspace members:
 
-- `autoresearch-core`: contracts, persistent sessions, budget accounting and isolated snapshots.
+- `autoresearch-core`: contracts, sessions, isolated snapshots, supervised execution and measured decisions.
 - `autoresearch-cli`: the `autoresearch` binary, with text and versioned JSON output.
 
 The workspace uses Rust 2021 and supports Rust 1.81 or later. `Cargo.lock` is
@@ -59,14 +59,15 @@ configuration. Existing sessions are never overwritten.
 `resume` moves a created or stopped session to `active`, or abandons an unfinished
 reservation while retaining its charge. It starts no process. An active session
 with no unfinished reservation needs no resume; use `status`. `stop` records
-`stopped` and retains any unfinished reservation's charge. It currently requires
-the session lock and cannot signal a running worker. Supervisors and cancellation
-requests belong to the process execution implementation.
+`stopped` and retains any unfinished reservation's charge. While a supervisor owns
+the writer lock, `stop` writes an atomic, execution-bound cancellation request.
+A repeated cancellation request stays bound to its original execution.
+Its acknowledgement means cancellation was requested; inspect the completed
+evaluation or subsequent status to confirm shutdown.
 
-The Python skills remain the operational optimization workflow. The Rust engine
-manages configuration, session metadata and isolated Git snapshots. Workspace
-commands invoke bounded Git plumbing; they do not run project checks, hooks,
-benchmarks or result acceptance.
+The Python skills retain their portable workflow. Rust `baseline` and `evaluate`
+run the configured checks, hooks and benchmarks independently of any agent.
+Workspace commands themselves only invoke bounded Git plumbing.
 
 ## Configuration version 2
 
@@ -97,12 +98,12 @@ from the Rust types after building:
 | `budget` | Positive attempt, active-time, deadline and byte limits. Command timeout cannot exceed active time; output allowance cannot exceed artifact storage. |
 | `commit_policy` | `never` or `explicit`. |
 
-These policies are declarations for the future runner. In particular,
-`network: "disabled"` does not install a network sandbox. Workspace preparation
-now verifies local repository identity, the requested commit, protected hashes
-and supported paths. It records the captured snapshot and explicit local-change
-policy. Measurement ordering, cache handling, hooks, process quotas and commit
-policy still require execution support.
+Workspace preparation verifies repository identity, the commit, protected hashes
+and supported paths. Execution requires `network: "allowed"`; the default
+`"disabled"` fails closed because there is no network isolation backend. Commands
+must be trusted. Execution additionally requires at least five measured runs,
+and warm cache mode requires at least one warmup. No command commits to the
+source repository, including when `commit_policy` is `explicit`.
 
 Inputs are limited to 1 MiB. Serde rejects unknown and duplicate fields, including
 duplicate keys in hash and environment maps. Semantic validation produces a
@@ -174,8 +175,8 @@ expired deadline. Repair alone creates no new budget or accepted result.
 
 Configuration and projection reads are limited to 1 MiB, journal reads/appends
 to 64 MiB, and each journal record to 16 KiB. Recovery backups are additional local
-files; the future artifact quota and retention implementation must account for
-them. Owned directories reject symlinks; opened session files reject symlinks,
+files; execution storage checks include them. Automatic retention is still
+unimplemented. Owned directories reject symlinks; opened session files reject symlinks,
 hard links and non-regular files. New owned directories use mode 0700 and new
 metadata files 0600. Snapshot files use Git's normal 0644/0755 modes inside private
 directories. The frozen configuration includes explicitly set environment
@@ -237,7 +238,7 @@ system/global config, replacement objects, lazy fetching, hooks, fsmonitor,
 automatic maintenance and transport protocols. Raw blob ingestion bypasses
 filters; export disables external diff and text conversion. Each plumbing process
 has a 30-second timeout, bounded stdout/stderr and no implicit shell. This small
-Git wrapper is not the future supervisor for arbitrary project processes.
+Git wrapper remains separate from the supervisor for project processes.
 
 The source's HEAD, index, refs, objects and user files are not changed by these
 operations. If the pilot root is also the source root, the explicitly owned
@@ -264,9 +265,9 @@ artifacts/
 
 A candidate ID contains 1–64 ASCII letters, digits, hyphens or underscores. Only
 one unsealed candidate can be prepared at a time. After sealing, a new candidate
-starts from the frozen initial baseline; accepted-reference promotion is not
-implemented yet. Baseline here means captured source, not a statistically
-qualified performance baseline. Candidate preparation does not reserve an
+starts from the latest accepted snapshot, or the initial snapshot before any
+promotion. Sealing rejects a candidate prepared against an obsolete reference.
+Capturing source does not qualify its measurements. Candidate preparation does not reserve an
 experiment attempt or execute any configured command.
 
 At sealing, every added, deleted or modified file must lie in the allowed scope
@@ -286,8 +287,9 @@ not preserved. These limits are checked before publishing a candidate snapshot.
 
 Sealing stores an independent copy and its SHA-256 inventory. Later edits to the
 editable candidate do not alter that copy. A changed frozen snapshot blocks reuse
-or export. There is no `kept` verdict, performance evidence or accepted-result
-promotion in this tranche.
+or export. Only evaluation can produce `kept` and promote that sealed snapshot.
+Code exports remain cumulative patches against the initial workspace; they do
+not embed evaluation reports or certify a verdict.
 
 An export must target a new directory outside the source and Git/engine metadata.
 It contains `base/`, `candidate.patch`, `manifest.json` and reproduction instructions.
@@ -302,7 +304,7 @@ The exported patch verifies code reproduction only. It does not verify behavior,
 performance or whether the candidate should be retained. Export is available
 while stopped or after the deadline; workspace creation, preparation and sealing
 require a non-stopped session with no reservation in flight and an unexpired
-deadline. The future runner will account for actual experiment stages.
+deadline. Evaluation accounts separately for actual process stages.
 
 Artifact manifests are version 1 and limited to 4 MiB; snapshots are limited to
 4,096 files and the smaller of 64 MiB or the configured artifact budget. Filesystem
@@ -311,7 +313,8 @@ artifact directory, including candidate copies and staged snapshots, against
 `max_artifact_bytes`. Each external bundle has the same byte ceiling separately.
 Temporary staging may consume bytes before that final check; this is not a live
 disk quota, and external bundles are not part of the session directory's cumulative
-limit. General retention, cleanup and process-output quotas remain future work.
+limit. Execution adds checks across the whole session and bounded process output.
+General retention and cleanup remain future work.
 
 Artifacts are synchronized and published before their journal event. An operation
 retry can reconcile a fully published artifact after an uncertain journal append;
@@ -327,37 +330,138 @@ Old metadata-only sessions remain readable: absent artifact projections default
 to an empty map. New artifact events require this engine version; older binaries
 will reject those events. Configuration version 2 itself is unchanged.
 
+## Execution, measurement and acceptance
+
+After creating a workspace, qualify its reference:
+
+```sh
+autoresearch baseline --session example-session --root /path/to/project \
+  --operation-id baseline-001 --json
+```
+
+Prepare, edit and seal a candidate using the workspace commands, then evaluate:
+
+```sh
+autoresearch evaluate --session example-session --root /path/to/project \
+  --candidate trial-001 --operation-id evaluate-001 --json
+```
+
+The engine copies sealed inputs into separate reference/candidate runtime trees.
+Each side runs setup, before hooks and mandatory checks. Source inventories are
+checked before and after commands; only declared generated paths may change.
+After hooks run at the end, with failures recorded separately from the verdict.
+An uncertain cleanup or unsettled reservation prevents completion and promotion.
+
+Commands receive only declared inherited/set variables, private `HOME` and
+`TMPDIR` directories, `AUTORESEARCH_SAMPLE_INDEX`, `AUTORESEARCH_INPUT_SHA256`,
+and `AUTORESEARCH_SEED` when seeds are declared. These names are reserved.
+Relative command working directories must be real directories inside the runtime.
+There is no implicit shell or inferred dependency installation: declare setup
+commands and writable build/cache paths explicitly. For example, Rust builds need
+an available toolchain and a declared generated target directory with the relevant
+environment settings; a private HOME does not inherit a rustup installation.
+
+The method fingerprint binds configuration, declared environment, OS/architecture
+and hashes of directly declared external executables. Relative executables belong
+to the snapshot or declared setup output. Transitive tools, libraries, external
+inputs and hardware state are not fully captured. `input_sha256` is a caller's
+workload identity declaration, not automatic hashing of an external dataset.
+Keep the workload fixed and checks/benchmark code protected.
+
+The benchmark emits UTF-8 stdout with exactly one JSON record for every declared
+primary and secondary metric. Other log lines are allowed, but any line starting
+with `METRIC` must follow this format:
+
+```text
+METRIC {"name":"bench_ms","value":12.4,"unit":"ms"}
+```
+
+Unknown fields/metrics, duplicate fields/metrics, missing values, wrong units,
+non-finite numbers and domain violations fail evaluation. Secondary bounds apply
+to every sample, including warmups. The portable helper's `METRIC name=value`
+format is not accepted by this runner.
+
+Qualification uses all declared baseline rounds and measured runs, excluding
+warmups from the summary. Noise is the maximum minus minimum at constant code;
+qualification requires that range not exceed `minimum_improvement`. Comparisons
+use at least five pairs with alternating reference/candidate order. The median
+of directional paired gains must exceed the minimum useful improvement plus the
+larger qualified/current reference noise. Reference drift beyond the declared
+minimum or qualified noise invalidates qualification. These are conservative
+fixed rules, not a statistical confidence guarantee.
+
+A promising candidate runs exactly one distinct confirmation series, with the
+same fixed sample count and its own warmups. Confirmation must pass the gain,
+reference stability and candidate noise gates, followed by final behavior checks.
+A noisy or insufficient gain is inconclusive; a clear regression or violated
+candidate secondary constraint is discarded. No optional stopping or automatic
+resampling makes a marginal candidate pass. Cold mode removes only declared
+private cache paths before each sample; warm mode preserves them after warmup;
+none performs no forced reset. Samples on both sides use the same seed schedule.
+A local lock serializes evaluations within a pilot root, not across the machine.
+
+Evidence lives under `executions/run-<operation-hash>/`: bounded stdout/stderr
+files, runtime trees and `report.json`. The report includes raw parsed samples,
+process outcomes, output hashes, method/configuration/source identities, decisions
+and reasons. After syncing the evidence, one journal event records its SHA-256,
+finishes the attempt and updates the accepted reference when the verdict is
+`kept`. Repeating the operation returns the same report without re-execution.
+A complete report written before that event can be reconciled with the same
+operation ID. Later candidates start from the accepted snapshot. Rejected and
+inconclusive evidence is retained; it does not replace the accepted reference.
+
+## Supervision and recovery
+
+The runner launches argv directly in a new POSIX process group. It drains bounded
+stdout/stderr through nonblocking streams, handles SIGINT/SIGTERM and cancellation
+requests, and enforces command timeouts. Shutdown sends TERM, then KILL after
+100 ms; cleanup has a two-second bound. An unreaped leader pins the group identity
+until the final signal. Descendants in that group are signalled even when their
+parent exits first. Buffered output must be drained before reporting success.
+
+A durable `process.json` marker records launch/ownership. After a supervisor crash,
+resume/stop never kill a recorded PID: a live or uninspectable group blocks recovery.
+An absent group allows metadata recovery; a crash before the group identity was
+recorded requires inspection. Resume abandons incomplete work, retaining reserved
+time. Do not delete locks or process markers to force recovery while work may live.
+
+This is trusted local execution, not a security sandbox. Processes that escape
+the group, access external files/network or alter metadata under the same user
+account are outside its isolation guarantees. Output is capped at the configured
+combined limit, with a 64 MiB per-command ceiling. Session storage is checked
+between stages and approximately every 20 ms while commands run; rapid writes can
+overshoot. This is a polled limit, not an OS disk quota. Four MiB are reserved for
+the final report. Evidence is retained; automatic retention cleanup is not present.
+
 ## Budget accounting
 
-The core exposes `reserve_work` and `settle_work` for a future trusted runner;
-neither is a public CLI command. One reservation currently consumes one attempt
-and charges the smallest of the command timeout, remaining active time and time
-to the original deadline. The runner must reserve durably before starting work.
-An already-applied reservation must never trigger the same work a second time.
+One candidate evaluation consumes one attempt; qualification consumes no attempt.
+Setup, checks, hooks, warmups, measurements and confirmation all reserve time
+before launch. Each reservation is the smallest of the command timeout, remaining
+active time and time until the original deadline. Settlement charges monotonic
+process elapsed time, including cleanup; overruns remain charged. Snapshot copying,
+hashing and idle time between commands are not included in active process time.
 
-Settlement can return unused time only for the current reservation and only
-from trusted monotonic elapsed time within the reservation. An interrupted or
-abandoned reservation keeps its entire charge. Stop/resume does not restore
-attempts, consumed time or the original deadline. Completed idle time between CLI
-calls is not active time. An exhausted budget blocks new work and resume, while
-stop remains possible. A regressed wall clock blocks new transitions except stop,
-which clamps its timestamp to the last event time.
-
-Multi-stage experiments, baseline costs and process timeout enforcement will
-build on this ledger. No actual experiment budget enforcement is claimed before
-that runner exists.
+An interrupted or abandoned reservation keeps its full charge. Stop/resume never
+restore attempts, consumed time or the original deadline. A depleted budget prevents
+another launch, including confirmation; incomplete evaluation cannot promote code.
+The legacy single-command `reserve_work`/`settle_work` API remains separate and
+cannot reserve work during an engine evaluation. It is not exposed through the CLI.
 
 ## CLI output and exit codes
 
 `--json` produces one JSON object on stdout using envelope `schema_version: 1`;
 this is independent of configuration version 2. `schema` always emits the schema
-object itself. Session responses contain state, remaining budgets, deadline,
-clock/recovery/projection flags and `commands_executed: false`. Resume/stop also
+object itself. Metadata responses contain state, remaining budgets, deadline,
+clock/recovery/projection flags and `commands_executed: false`. Idle resume/stop also
 report `already_applied`. Configuration values are not echoed in parse errors or
 status output. Workspace responses instead include `experiments_executed: false`
 and an `artifact` object with path, SHA-256, file count, retry status and
 `evaluated: false`. Session state lists journaled artifact fingerprints. Text
-errors go to stderr.
+errors go to stderr. `baseline`/`evaluate` return an `evaluation` object with the
+report, evidence SHA-256 and retry status. Exit zero means the operation completed;
+it does not imply `kept`. Inspect `evaluation.report.decision` (`qualified`, `kept`,
+`discarded`, `inconclusive`, `failed` or `cancelled`).
 
 | Code | Meaning |
 | --- | --- |
@@ -365,7 +469,7 @@ errors go to stderr.
 | 1 | Filesystem I/O failed. |
 | 2 | Invalid arguments, identifier or configuration. |
 | 3 | Unsupported session platform, or `doctor` could not find Git on a supported platform. |
-| 4 | Conflicting operation or session lock busy. |
+| 4 | Conflicting operation, session lock busy, or missing/stale baseline. |
 | 5 | Corrupt session/artifact, unsafe path, storage limit or failed state projection. |
 | 6 | Attempt/time budget or original deadline exhausted. |
 | 7 | Clock moved backwards or outside the supported range. |
@@ -399,7 +503,9 @@ The archive remains unchanged and is not imported automatically. Historical
 unknown outcomes and malformed records never become verified Rust results.
 See `THIRD_PARTY_NOTICES.md` for attribution.
 
-The next implementation is process supervision: declared environment, owned
-process groups, cancellation, timeouts, output and storage quotas, and accounting
-for multi-stage experiments. Baseline qualification, comparisons, acceptance and
-the Pi adapter follow that foundation. See `IMPLEMENTATION_PLAN.md` for the complete sequence.
+Execution tests also cover descendant cleanup, TERM resistance, bounded output,
+stop/SIGTERM cancellation, noisy references, constraints, confirmation failure,
+atomic evidence recovery and promotion followed by regression.
+
+Next comes CLI/skill integration (lot 7), followed by the Pi adapter, historical
+import, full result bundles and release packaging. See `IMPLEMENTATION_PLAN.md`.
