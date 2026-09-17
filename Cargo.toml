@@ -19,6 +19,8 @@ schemars = "=0.8.22"
 sha2 = "=0.10.8"
 tempfile = "=3.13.0"
 libc = "=0.2.159"
+rustix = { version = "=0.38.37", features = ["process"] }
+signal-hook = "=0.3.17"
 jsonschema = { version = "=0.18.3", default-features = false }
 # Keep schema-test transitive dependencies compatible with the Rust 1.81 MSRV.
 url = "=2.5.2"

@@ -18,8 +18,8 @@ results. Any code ported from the archive must retain its applicable notices.
 
 ## Rust dependencies
 
-Direct runtime dependencies are Serde, serde_json, fs2, sha2, tempfile and libc
-under MIT OR Apache-2.0, and schemars under MIT. Schema validation tests additionally
+Direct runtime dependencies are Serde, serde_json, fs2, sha2, tempfile, libc,
+rustix and signal-hook under MIT OR Apache-2.0, and schemars under MIT. Schema validation tests additionally
 use jsonschema under MIT. `Cargo.lock` records the exact dependency graph, including
 transitive and test dependencies; this paragraph is not a full release license
 inventory. Dependency license texts and copyright notices must accompany binary

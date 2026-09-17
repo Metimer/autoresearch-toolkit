@@ -58,6 +58,24 @@ pub struct Reservation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct Execution {
+    pub operation_id: String,
+    pub candidate: Option<String>,
+    pub parent: String,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Decision {
+    Qualified,
+    Kept,
+    Discarded,
+    Inconclusive,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SessionState {
     pub format_version: u32,
     pub session_id: String,
@@ -70,6 +88,14 @@ pub struct SessionState {
     pub in_flight: Option<Reservation>,
     #[serde(default)]
     pub artifacts: BTreeMap<String, String>,
+    #[serde(default)]
+    pub accepted: Option<String>,
+    #[serde(default)]
+    pub qualification: Option<String>,
+    #[serde(default)]
+    pub execution: Option<Execution>,
+    #[serde(default)]
+    pub evaluated: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,6 +113,23 @@ pub struct SessionView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum Event {
+    ExecutionStarted {
+        candidate: Option<String>,
+        parent: String,
+    },
+    StageReserved {
+        reserved_ms: u64,
+    },
+    StageSettled {
+        reservation_id: String,
+        elapsed_ms: u64,
+    },
+    ExecutionFinished {
+        report_key: String,
+        sha256: String,
+        decision: Decision,
+        invalidate_reference: bool,
+    },
     ArtifactPublished {
         key: String,
         sha256: String,
@@ -154,6 +197,13 @@ impl SessionStore {
             ));
         }
         Ok(Self { root })
+    }
+
+    pub(crate) fn session_path(&self, id: &str) -> Result<PathBuf> {
+        identifier(id)?;
+        let path = self.directory(false)?.join(id);
+        check_directory(&path)?;
+        Ok(path)
     }
 
     fn directory(&self, create: bool) -> Result<PathBuf> {
@@ -238,6 +288,10 @@ impl SessionStore {
                 active_ms_used: 0,
                 in_flight: None,
                 artifacts: BTreeMap::new(),
+                accepted: None,
+                qualification: None,
+                execution: None,
+                evaluated: BTreeMap::new(),
             },
             previous_hash: String::new(),
             operations: HashMap::new(),
@@ -330,7 +384,7 @@ impl SessionStore {
 }
 
 /// Owns an OS advisory lock until dropped (also released by the OS on process exit).
-/// Keep this guard for the entire future runner operation, not just the first write.
+/// Keep this guard for the entire runner operation, not just the first write.
 pub struct SessionGuard {
     path: PathBuf,
     _lock: OwnedLock,
@@ -391,6 +445,70 @@ impl SessionGuard {
         )
     }
 
+    pub(crate) fn begin_execution(
+        &mut self,
+        operation: &str,
+        candidate: Option<String>,
+        parent: String,
+        now: u64,
+    ) -> Result<()> {
+        if self.operations.contains_key(operation) {
+            return Err(SessionError::new("recovery_required", "this execution ID was already started; inspect its result or resume and use a new ID"));
+        }
+        self.record(
+            operation,
+            now,
+            Event::ExecutionStarted { candidate, parent },
+        )?;
+        Ok(())
+    }
+    pub(crate) fn reserve_stage(&mut self, operation: &str, now: u64) -> Result<u64> {
+        let budget = &self.config.get().budget;
+        let reserved_ms = (budget.command_timeout_seconds * 1000)
+            .min((budget.active_seconds * 1000).saturating_sub(self.state.active_ms_used))
+            .min(budget.deadline_unix_ms.saturating_sub(now));
+        self.record(operation, now, Event::StageReserved { reserved_ms })?;
+        Ok(reserved_ms)
+    }
+    pub(crate) fn settle_stage(
+        &mut self,
+        operation: &str,
+        reservation: &str,
+        elapsed_ms: u64,
+        now: u64,
+    ) -> Result<()> {
+        self.record(
+            operation,
+            now.max(self.state.last_event_unix_ms),
+            Event::StageSettled {
+                reservation_id: reservation.into(),
+                elapsed_ms,
+            },
+        )?;
+        Ok(())
+    }
+    pub(crate) fn finish_execution(
+        &mut self,
+        operation: &str,
+        report_key: &str,
+        sha256: &str,
+        decision: Decision,
+        invalidate_reference: bool,
+        now: u64,
+    ) -> Result<()> {
+        self.record(
+            operation,
+            now.max(self.state.last_event_unix_ms),
+            Event::ExecutionFinished {
+                report_key: report_key.into(),
+                sha256: sha256.into(),
+                decision,
+                invalidate_reference,
+            },
+        )?;
+        Ok(())
+    }
+
     pub fn state(&self) -> &SessionState {
         &self.state
     }
@@ -410,7 +528,7 @@ impl SessionGuard {
             deadline_unix_ms: budget.deadline_unix_ms,
             deadline_expired: now >= budget.deadline_unix_ms,
             clock_regressed: now < self.state.last_event_unix_ms,
-            recovery_required: self.state.in_flight.is_some(),
+            recovery_required: self.state.in_flight.is_some() || self.state.execution.is_some(),
             projection_current: self.projection_current,
         }
     }
@@ -418,11 +536,13 @@ impl SessionGuard {
     /// Resume restores metadata only. It never starts an experiment or replenishes budgets.
     /// Unsettled work retains its full reservation when explicitly abandoned by resume.
     pub fn resume(&mut self, operation_id: &str, now: u64) -> Result<bool> {
+        crate::supervisor::check_recovery(&self.path.join("process.json"))?;
         self.record(operation_id, now, Event::Resumed)
     }
 
     /// Stop is permitted after budget expiry and clamps a regressed wall clock.
     pub fn stop(&mut self, operation_id: &str, now: u64) -> Result<bool> {
+        crate::supervisor::check_recovery(&self.path.join("process.json"))?;
         self.record(
             operation_id,
             now.max(self.state.last_event_unix_ms),
@@ -430,10 +550,9 @@ impl SessionGuard {
         )
     }
 
-    /// Accounting API for the future trusted runner. Reserve before starting any work.
+    /// Legacy single-command accounting. Reserve before starting any work.
     /// `true` means already recorded: never execute the same work again on a retry.
-    /// One reservation currently consumes one attempt; multi-stage experiment
-    /// accounting belongs to the future orchestrator.
+    /// One reservation consumes one attempt. The engine uses separate stage accounting.
     pub fn reserve_work(&mut self, operation_id: &str, now: u64) -> Result<bool> {
         // Preserve retry identity even if the available budget has changed since the call.
         let reserved_ms = match self.operations.get(operation_id) {
@@ -590,6 +709,145 @@ fn apply(state: &mut SessionState, config: &SessionConfig, record: &Record) -> R
         ));
     }
     match &record.event {
+        Event::ExecutionStarted { candidate, parent } => {
+            if state.artifacts.len() >= 256 {
+                return Err(SessionError::new(
+                    "storage_limit",
+                    "session artifact limit reached",
+                ));
+            }
+            if state.status == SessionStatus::Stopped
+                || state.execution.is_some()
+                || state.in_flight.is_some()
+                || !state.artifacts.contains_key(parent)
+                || state.accepted.as_deref().unwrap_or("workspace") != parent
+            {
+                return Err(SessionError::new(
+                    "conflict",
+                    "execution requires the current reference and an idle session",
+                ));
+            }
+            if remaining == 0 || record.at_unix_ms >= budget.deadline_unix_ms {
+                return Err(SessionError::new(
+                    "budget_exhausted",
+                    "execution budget exhausted",
+                ));
+            }
+            if let Some(candidate) = candidate {
+                if state.evaluated.contains_key(candidate) {
+                    return Err(SessionError::new("conflict", "candidate already evaluated"));
+                }
+                if state.qualification.is_none() || !state.artifacts.contains_key(candidate) {
+                    return Err(SessionError::new(
+                        "conflict",
+                        "qualify the reference and seal the candidate first",
+                    ));
+                }
+                if state.attempts_used >= budget.max_experiments {
+                    return Err(SessionError::new(
+                        "budget_exhausted",
+                        "attempt budget exhausted",
+                    ));
+                }
+                state.attempts_used += 1;
+            }
+            state.execution = Some(Execution {
+                operation_id: record.operation_id.clone(),
+                candidate: candidate.clone(),
+                parent: parent.clone(),
+            });
+            state.status = SessionStatus::Active;
+        }
+        Event::StageReserved { reserved_ms } => {
+            if state.execution.is_none() || state.in_flight.is_some() {
+                return Err(SessionError::new(
+                    "conflict",
+                    "stage requires an active execution",
+                ));
+            }
+            let expected = (budget.command_timeout_seconds * 1000)
+                .min(remaining)
+                .min(budget.deadline_unix_ms.saturating_sub(record.at_unix_ms));
+            if *reserved_ms == 0 || *reserved_ms != expected {
+                return Err(SessionError::new(
+                    "budget_exhausted",
+                    "stage has no bounded time reservation",
+                ));
+            }
+            state.active_ms_used += reserved_ms;
+            state.in_flight = Some(Reservation {
+                operation_id: record.operation_id.clone(),
+                reserved_ms: *reserved_ms,
+            });
+        }
+        Event::StageSettled {
+            reservation_id,
+            elapsed_ms,
+        } => {
+            let pending = state
+                .in_flight
+                .as_ref()
+                .ok_or_else(|| SessionError::new("conflict", "stage is not reserved"))?;
+            if state.execution.is_none() || &pending.operation_id != reservation_id {
+                return Err(SessionError::new("conflict", "stage reservation differs"));
+            }
+            state.active_ms_used = state
+                .active_ms_used
+                .saturating_sub(pending.reserved_ms)
+                .checked_add(*elapsed_ms)
+                .ok_or_else(|| SessionError::new("storage_limit", "elapsed time overflow"))?;
+            state.in_flight = None;
+        }
+        Event::ExecutionFinished {
+            report_key,
+            sha256,
+            decision,
+            invalidate_reference,
+        } => {
+            identifier(report_key)?;
+            let execution = state
+                .execution
+                .as_ref()
+                .ok_or_else(|| SessionError::new("conflict", "no active execution"))?;
+            if state.in_flight.is_some()
+                || state.artifacts.contains_key(report_key)
+                || sha256.len() != 64
+                || !sha256.bytes().all(|b| b.is_ascii_hexdigit())
+            {
+                return Err(SessionError::new(
+                    "conflict",
+                    "invalid execution completion",
+                ));
+            }
+            match decision {
+                Decision::Qualified if execution.candidate.is_none() => {
+                    state.accepted = Some(execution.parent.clone());
+                    state.qualification = Some(report_key.clone());
+                }
+                Decision::Kept if execution.candidate.is_some() => {
+                    state.accepted = execution.candidate.clone();
+                    state.qualification = Some(report_key.clone());
+                }
+                Decision::Qualified | Decision::Kept => {
+                    return Err(SessionError::new(
+                        "conflict",
+                        "decision does not match execution kind",
+                    ))
+                }
+                _ => {
+                    if execution.candidate.is_none() || *invalidate_reference {
+                        state.qualification = None;
+                    }
+                }
+            }
+            if let Some(candidate) = &execution.candidate {
+                state
+                    .evaluated
+                    .insert(candidate.clone(), report_key.clone());
+            }
+            state.artifacts.insert(report_key.clone(), sha256.clone());
+            state.execution = None;
+        }
         Event::ArtifactPublished { key, sha256 } => {
             identifier(key)?;
             if sha256.len() != 64
@@ -615,10 +873,14 @@ fn apply(state: &mut SessionState, config: &SessionConfig, record: &Record) -> R
         }
         Event::Resumed => {
             ensure_budget()?;
-            if state.status == SessionStatus::Active && state.in_flight.is_none() {
+            if state.status == SessionStatus::Active
+                && state.in_flight.is_none()
+                && state.execution.is_none()
+            {
                 return Err(SessionError::new("conflict", "session is already active"));
             }
             state.in_flight = None; // Any lost reservation stays charged.
+            state.execution = None;
             state.status = SessionStatus::Active;
         }
         Event::Stopped => {
@@ -627,8 +889,12 @@ fn apply(state: &mut SessionState, config: &SessionConfig, record: &Record) -> R
             }
             state.in_flight = None;
             state.status = SessionStatus::Stopped;
+            state.execution = None;
         }
         Event::WorkReserved { reserved_ms } => {
+            if state.execution.is_some() {
+                return Err(SessionError::new("conflict", "an evaluation is active"));
+            }
             ensure_budget()?;
             if state.status != SessionStatus::Active || state.in_flight.is_some() {
                 return Err(SessionError::new(
@@ -695,6 +961,10 @@ fn replay(config: &ValidatedConfig, bytes: &[u8]) -> Result<Replay> {
         active_ms_used: 0,
         in_flight: None,
         artifacts: BTreeMap::new(),
+        accepted: None,
+        qualification: None,
+        execution: None,
+        evaluated: BTreeMap::new(),
     };
     let mut previous = String::new();
     let mut operations = HashMap::new();
@@ -806,7 +1076,7 @@ pub(crate) fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>> {
     }
     Ok(bytes)
 }
-struct OwnedLock(File);
+pub(crate) struct OwnedLock(File);
 impl Drop for OwnedLock {
     fn drop(&mut self) {
         // Explicitly unlock before close: concurrent fork/spawn may temporarily
@@ -815,7 +1085,7 @@ impl Drop for OwnedLock {
     }
 }
 
-fn acquire(path: &Path, create: bool) -> Result<OwnedLock> {
+pub(crate) fn acquire(path: &Path, create: bool) -> Result<OwnedLock> {
     let mut options = OpenOptions::new();
     options
         .read(true)
@@ -853,7 +1123,7 @@ pub(crate) fn write_new(path: &Path, bytes: &[u8]) -> Result<()> {
     file.sync_all()?;
     Ok(())
 }
-fn atomic_replace(path: &Path, bytes: &[u8]) -> Result<()> {
+pub(crate) fn atomic_replace(path: &Path, bytes: &[u8]) -> Result<()> {
     match path.symlink_metadata() {
         Ok(_) => {
             regular_open(path, false)?;

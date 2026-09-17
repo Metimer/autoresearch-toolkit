@@ -32,8 +32,8 @@ pub struct FileEntry {
     pub bytes: u64,
     pub mode: u32,
 }
-type Inventory = BTreeMap<String, FileEntry>;
-type Contents = BTreeMap<String, (FileEntry, Vec<u8>)>;
+pub(crate) type Inventory = BTreeMap<String, FileEntry>;
+pub(crate) type Contents = BTreeMap<String, (FileEntry, Vec<u8>)>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -64,14 +64,14 @@ struct SourceIdentity {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Manifest {
+pub(crate) struct Manifest {
     format_version: u32,
     operation_id: String,
     request: Request,
     config_sha256: String,
-    base_sha256: Option<String>,
+    pub(crate) base_sha256: Option<String>,
     source: Option<SourceIdentity>,
-    files: Inventory,
+    pub(crate) files: Inventory,
     export_proof: Option<ExportIntegrity>,
 }
 
@@ -197,7 +197,8 @@ impl SessionGuard {
                 "seal the current candidate before preparing another",
             );
         }
-        let (base, digest, base_path) = self.load_artifact("workspace")?;
+        let reference = self.state().accepted.as_deref().unwrap_or("workspace");
+        let (base, digest, base_path) = self.load_artifact(reference)?;
         let files = verify_snapshot(&base_path, &base.files, self.config())?;
         let manifest = Manifest {
             format_version: 1,
@@ -233,7 +234,8 @@ impl SessionGuard {
             return Ok(result);
         }
         self.workspace_gate(now)?;
-        let (base, base_hash, base_path) = self.load_artifact("workspace")?;
+        let reference = self.state().accepted.as_deref().unwrap_or("workspace");
+        let (base, base_hash, base_path) = self.load_artifact(reference)?;
         verify_snapshot(&base_path, &base.files, self.config())?;
         let (prepared, _, candidate_path) =
             self.load_artifact(&format!("candidate-{candidate}"))?;
@@ -299,7 +301,7 @@ impl SessionGuard {
         if output.starts_with(self.owned_path()) {
             return fail("unsafe_path", "export must be outside the session storage");
         }
-        let (base, base_hash, base_path) = self.load_artifact("workspace")?;
+        let (base, _base_hash, base_path) = self.load_artifact("workspace")?;
         let source = Path::new(
             &base
                 .source
@@ -335,12 +337,6 @@ impl SessionGuard {
         let base_files = verify_snapshot(&base_path, &base.files, self.config())?;
         let (sealed, sealed_hash, sealed_path) =
             self.load_artifact(&format!("sealed-{candidate}"))?;
-        if sealed.base_sha256.as_ref() != Some(&base_hash) {
-            return fail(
-                "corrupt_artifact",
-                "sealed candidate belongs to another baseline",
-            );
-        }
         let files = verify_snapshot(&sealed_path, &sealed.files, self.config())?;
         check_scope(&base.files, &sealed.files, self.config())?;
         let git_dir = tempfile::tempdir()?;
@@ -422,7 +418,10 @@ impl SessionGuard {
     }
 
     fn workspace_gate(&self, now: u64) -> Result<()> {
-        if self.state().status == SessionStatus::Stopped || self.state().in_flight.is_some() {
+        if self.state().status == SessionStatus::Stopped
+            || self.state().in_flight.is_some()
+            || self.state().execution.is_some()
+        {
             return fail(
                 "conflict",
                 "workspace changes require a session that is not stopped and has no work in flight",
@@ -441,7 +440,7 @@ impl SessionGuard {
         owned_directory(&path)?;
         Ok(path)
     }
-    fn load_artifact(&self, key: &str) -> Result<(Manifest, String, PathBuf)> {
+    pub(crate) fn load_artifact(&self, key: &str) -> Result<(Manifest, String, PathBuf)> {
         let parent = self.owned_path().join("artifacts");
         session::check_directory(&parent)?;
         let path = parent.join(key);
@@ -596,7 +595,7 @@ fn manifest_hash(manifest: &Manifest) -> Result<String> {
         |_| SessionError::new("corrupt_artifact", "cannot encode manifest"),
     )?))
 }
-fn inventory(files: &Contents) -> Inventory {
+pub(crate) fn inventory(files: &Contents) -> Inventory {
     files
         .iter()
         .map(|(p, (entry, _))| (p.clone(), entry.clone()))
@@ -650,7 +649,11 @@ fn covers(paths: &[String], file: &str) -> bool {
         .iter()
         .any(|p| p == file || (p.ends_with('/') && file.starts_with(p)))
 }
-fn check_scope(base: &Inventory, files: &Inventory, config: &SessionConfig) -> Result<()> {
+pub(crate) fn check_scope(
+    base: &Inventory,
+    files: &Inventory,
+    config: &SessionConfig,
+) -> Result<()> {
     for path in base.keys().chain(files.keys()) {
         if base.get(path) != files.get(path)
             && (!covers(&config.scope.allowed_paths, path)
@@ -749,7 +752,7 @@ fn file_bytes(root: &Path, path: &str, limit: usize) -> Result<Option<(FileEntry
     }
     unreachable!()
 }
-fn scan(root: &Path, config: &SessionConfig, skip_generated: bool) -> Result<Contents> {
+pub(crate) fn scan(root: &Path, config: &SessionConfig, skip_generated: bool) -> Result<Contents> {
     session::check_directory(root)?;
     let mut files = BTreeMap::new();
     let mut stack = vec![String::new()];
@@ -790,7 +793,11 @@ fn scan(root: &Path, config: &SessionConfig, skip_generated: bool) -> Result<Con
     check_inventory(&files, config)?;
     Ok(files)
 }
-fn verify_snapshot(path: &Path, expected: &Inventory, config: &SessionConfig) -> Result<Contents> {
+pub(crate) fn verify_snapshot(
+    path: &Path,
+    expected: &Inventory,
+    config: &SessionConfig,
+) -> Result<Contents> {
     let files = scan(&path.join("tree"), config, false)?;
     if &inventory(&files) != expected {
         return fail(
@@ -800,7 +807,7 @@ fn verify_snapshot(path: &Path, expected: &Inventory, config: &SessionConfig) ->
     }
     Ok(files)
 }
-fn write_tree(root: &Path, files: &Contents) -> Result<()> {
+pub(crate) fn write_tree(root: &Path, files: &Contents) -> Result<()> {
     owned_directory(root)?;
     for (name, (entry, bytes)) in files {
         safe_path(name)?;
@@ -823,7 +830,7 @@ fn write_tree(root: &Path, files: &Contents) -> Result<()> {
     }
     sync_tree(root)
 }
-fn owned_directory(path: &Path) -> Result<()> {
+pub(crate) fn owned_directory(path: &Path) -> Result<()> {
     let mut builder = fs::DirBuilder::new();
     #[cfg(unix)]
     {
@@ -849,7 +856,7 @@ fn sync_tree(root: &Path) -> Result<()> {
     }
     session::sync_directory(root)
 }
-fn directory_bytes(root: &Path) -> Result<u64> {
+pub(crate) fn directory_bytes(root: &Path) -> Result<u64> {
     fn walk(root: &Path, depth: usize, count: &mut usize) -> Result<u64> {
         if depth > 70 || *count > 100_000 {
             return fail("storage_limit", "artifact directory limit exceeded");
