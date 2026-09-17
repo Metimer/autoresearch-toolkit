@@ -107,7 +107,7 @@ fn oversized_config_is_rejected() {
 }
 
 #[test]
-fn doctor_reports_missing_git_and_unimplemented_execution() {
+fn doctor_reports_missing_git_and_unavailable_execution() {
     let fixture = Fixture::new();
     let result = fixture
         .cli()
@@ -568,4 +568,149 @@ fn workspace_cli_requires_explicit_policy_and_rejects_invalid_options_and_scope(
     ]);
     assert_eq!(sealed.status.code(), Some(8));
     assert_eq!(body(&sealed)["error"]["code"], "scope_violation");
+}
+
+fn execution_fixture(fixture: &Fixture, slow: bool) -> String {
+    let id = source_fixture(fixture);
+    let path = fixture.0.join("workspace.json");
+    let mut config: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    config["execution"]["network"] = json!("allowed");
+    config["sampling"]["warmup"] = json!(0);
+    config["checks"] =
+        json!([{"executable":"/bin/sh", "args":["-c", "test -s src/main.txt"], "cwd":"."}]);
+    let code = if slow {
+        "sleep 10"
+    } else {
+        "v=10; if test \"$(cat src/main.txt)\" = fast; then v=5; fi; printf 'METRIC {\"name\":\"bench_ms\",\"value\":%s,\"unit\":\"ms\"}\\n' \"$v\""
+    };
+    config["benchmark"] = json!({"executable":"/bin/sh", "args":["-c",code], "cwd":"."});
+    fs::write(path, serde_json::to_vec(&config).unwrap()).unwrap();
+    for args in [
+        vec![
+            "init",
+            "--config",
+            "workspace.json",
+            "--operation-id",
+            "init",
+        ],
+        vec![
+            "workspace",
+            "--session",
+            &id,
+            "--local-changes",
+            "exclude",
+            "--operation-id",
+            "workspace",
+        ],
+    ] {
+        let out = fixture.cli().args(args).arg("--json").output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+    }
+    id
+}
+
+#[test]
+fn standalone_cli_qualifies_evaluates_and_retries_a_sealed_candidate() {
+    let fixture = Fixture::new();
+    let id = execution_fixture(&fixture, false);
+    let run = |args: &[&str]| {
+        let out = fixture
+            .cli()
+            .args(args)
+            .args(["--session", &id, "--json"])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{out:?}");
+        body(&out)
+    };
+    let baseline = run(&["baseline", "--operation-id", "baseline"]);
+    assert_eq!(baseline["evaluation"]["report"]["decision"], "qualified");
+    let prepared = run(&[
+        "prepare-candidate",
+        "--candidate",
+        "fast",
+        "--hypothesis",
+        "less work",
+        "--operation-id",
+        "prepare",
+    ]);
+    let path = PathBuf::from(prepared["artifact"]["path"].as_str().unwrap());
+    fs::write(path.join("src/main.txt"), "fast").unwrap();
+    run(&["seal", "--candidate", "fast", "--operation-id", "seal"]);
+    let args = ["evaluate", "--candidate", "fast", "--operation-id", "trial"];
+    let result = run(&args);
+    assert_eq!(result["evaluation"]["report"]["decision"], "kept");
+    assert_eq!(result["session"]["state"]["accepted"], "sealed-fast");
+    assert_eq!(run(&args)["evaluation"]["already_applied"], true);
+    assert_eq!(
+        fs::read(fixture.0.join("source/src/main.txt")).unwrap(),
+        b"baseline\n"
+    );
+}
+
+#[test]
+fn stop_and_sigterm_cancel_a_separate_running_cli_process() {
+    use std::{
+        process::Stdio,
+        time::{Duration, Instant},
+    };
+    for signal in [false, true] {
+        let fixture = Fixture::new();
+        let id = execution_fixture(&fixture, true);
+        let mut child = fixture
+            .cli()
+            .args([
+                "baseline",
+                "--session",
+                &id,
+                "--operation-id",
+                "baseline",
+                "--json",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let path = fixture.0.join(".auto/engine/sessions").join(&id);
+        let start = Instant::now();
+        while !path.join("process.json").exists() {
+            if start.elapsed() > Duration::from_secs(10) {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("runner did not start");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if signal {
+            assert!(Command::new("/bin/kill")
+                .args(["-TERM", &child.id().to_string()])
+                .status()
+                .unwrap()
+                .success());
+        } else {
+            let stop = fixture
+                .cli()
+                .args(["stop", "--session", &id, "--operation-id", "stop", "--json"])
+                .output()
+                .unwrap();
+            assert!(stop.status.success(), "{stop:?}");
+            assert_eq!(body(&stop)["cancellation_requested"], true);
+        }
+        while child.try_wait().unwrap().is_none() {
+            if start.elapsed() > Duration::from_secs(10) {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("runner did not cancel");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let result = child.wait_with_output().unwrap();
+        assert!(result.status.success(), "{result:?}");
+        assert_eq!(
+            body(&result)["evaluation"]["report"]["decision"],
+            "cancelled"
+        );
+        assert_eq!(body(&result)["session"]["state"]["status"], "stopped");
+        assert!(!path.join("process.json").exists());
+    }
 }

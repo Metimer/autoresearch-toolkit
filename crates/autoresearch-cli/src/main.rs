@@ -27,6 +27,8 @@ Usage:
   autoresearch prepare-candidate --session <id> --candidate <id> --hypothesis <text> --operation-id <id> [--root <dir>] [--json]
   autoresearch seal --session <id> --candidate <id> --operation-id <id> [--root <dir>] [--json]
   autoresearch export-candidate --session <id> --candidate <id> --output <new-dir> --operation-id <id> [--root <dir>] [--json]
+  autoresearch baseline --session <id> --operation-id <id> [--root <dir>] [--json]
+  autoresearch evaluate --session <id> --candidate <id> --operation-id <id> [--root <dir>] [--json]
   autoresearch --help
   autoresearch --version
 
@@ -35,9 +37,11 @@ validate checks the draft JSON contract without executing commands, inspecting t
 source repository, checking the current deadline, or creating a session.
 Session commands persist metadata below the explicit root (default: current directory).
 Use the same operation ID to retry a mutation; use a new ID for a new operation.
-resume activates metadata only; stop does not signal a running supervisor yet.
+baseline qualifies the captured reference; evaluate checks and measures a sealed candidate.
+stop requests cancellation when a supervisor owns the session lock.
 Workspace commands use isolated Git plumbing and never run project commands.
-Exports are unevaluated candidates. Experiment execution and the Pi adapter are not implemented yet.
+Execution requires trusted commands and network=allowed; there is no network sandbox.
+The Pi adapter is not implemented yet.
 ";
 
 fn main() -> ExitCode {
@@ -88,6 +92,8 @@ fn main() -> ExitCode {
                 "prepare-candidate",
                 "seal",
                 "export-candidate",
+                "baseline",
+                "evaluate",
             ]
             .iter()
             .any(|name| command == name) =>
@@ -137,9 +143,9 @@ fn doctor(as_json: bool) -> ExitCode {
         "platform": {"os": env::consts::OS, "arch": env::consts::ARCH, "supported": supported},
         "git_on_path": git_found,
         "git_version_verified": false,
-        "capabilities": {"validate_config": true, "manage_sessions": supported, "isolated_workspaces": supported && git_found, "run_experiments": false, "pi_adapter": false}
+        "capabilities": {"validate_config": true, "manage_sessions": supported, "isolated_workspaces": supported && git_found, "run_experiments": supported && git_found, "pi_adapter": false}
     }), &format!(
-        "Autoresearch {}\nPlatform: {} / {} (supported: {})\nGit executable on PATH: {} (version not verified)\nAvailable: configuration validation, persistent sessions and isolated snapshots. Experiment execution is not implemented yet.",
+        "Autoresearch {}\nPlatform: {} / {} (supported: {})\nGit executable on PATH: {} (version not verified)\nAvailable: configuration validation, persistent sessions and isolated snapshots. Trusted command supervision and paired evaluations are available.",
         env!("CARGO_PKG_VERSION"), env::consts::OS, env::consts::ARCH, supported, git_found
     ));
     if ready {
@@ -256,7 +262,8 @@ fn session_args(command: &str, args: &[OsString]) -> Result<SessionArgs, &'stati
                 parsed.operation = Some(id.into());
             }
             Some("--candidate")
-                if ["prepare-candidate", "seal", "export-candidate"].contains(&command)
+                if ["prepare-candidate", "seal", "export-candidate", "evaluate"]
+                    .contains(&command)
                     && parsed.candidate.is_none() =>
             {
                 parsed.candidate = Some(value.to_str().ok_or("candidate must be UTF-8")?.into())
@@ -283,7 +290,7 @@ fn session_args(command: &str, args: &[OsString]) -> Result<SessionArgs, &'stati
         || (command != "init" && parsed.session.is_none())
         || (command != "status" && parsed.operation.is_none())
         || (command == "workspace" && parsed.local_changes.is_none())
-        || (["prepare-candidate", "seal", "export-candidate"].contains(&command)
+        || (["prepare-candidate", "seal", "export-candidate", "evaluate"].contains(&command)
             && parsed.candidate.is_none())
         || (command == "prepare-candidate" && parsed.hypothesis.is_none())
         || (command == "export-candidate" && parsed.output.is_none())
@@ -342,8 +349,44 @@ fn session_command(command: &str, args: &[OsString], as_json: bool) -> ExitCode 
     };
     let mut guard = match opened {
         Ok(guard) => guard,
+        Err(issue) if command == "stop" && issue.code == "session_busy" => {
+            return match store.request_stop(
+                args.session.as_deref().unwrap(),
+                args.operation.as_deref().unwrap(),
+            ) {
+                Ok(token) => {
+                    emit(as_json,json!({"schema_version":1,"command":"stop","ok":true,"cancellation_requested":true,"execution_token":token}),"Cancellation requested; the supervisor will terminate its owned process group.");
+                    ExitCode::SUCCESS
+                }
+                Err(issue) => session_error(as_json, issue),
+            };
+        }
         Err(issue) => return session_error(as_json, issue),
     };
+    if ["baseline", "evaluate"].contains(&command) {
+        let result = if command == "baseline" {
+            guard.baseline(args.operation.as_deref().unwrap())
+        } else {
+            guard.evaluate_candidate(
+                args.operation.as_deref().unwrap(),
+                args.candidate.as_deref().unwrap(),
+            )
+        };
+        return match result {
+            Ok(evaluation) => {
+                emit(
+                    as_json,
+                    json!({"schema_version":1,"command":command,"ok":true,"evaluation":evaluation,"session":guard.view(autoresearch_core::supervisor::now_ms().unwrap_or(now))}),
+                    &format!(
+                        "Decision: {:?}\nReason: {}\nEvidence SHA-256: {}",
+                        evaluation.report.decision, evaluation.report.reason, evaluation.sha256
+                    ),
+                );
+                ExitCode::SUCCESS
+            }
+            Err(issue) => session_error(as_json, issue),
+        };
+    }
     if ["workspace", "prepare-candidate", "seal", "export-candidate"].contains(&command) {
         let operation = args.operation.as_deref().expect("checked operation");
         let result = match command {
@@ -409,11 +452,13 @@ fn session_command(command: &str, args: &[OsString], as_json: bool) -> ExitCode 
 
 fn session_error(as_json: bool, issue: SessionError) -> ExitCode {
     let exit = match issue.code {
-        "invalid_config" | "invalid_identifier" => 2,
+        "invalid_config" | "invalid_identifier" | "invalid_protocol" | "invalid_environment" => 2,
         "unsupported" => 3,
-        "conflict" | "session_busy" | "source_changed" => 4,
+        "conflict" | "session_busy" | "source_changed" | "baseline_required" | "baseline_stale" => {
+            4
+        }
         "corrupt_session" | "corrupt_artifact" | "projection_failed" | "unsafe_path"
-        | "storage_limit" => 5,
+        | "storage_limit" | "recovery_required" => 5,
         "budget_exhausted" => 6,
         "clock_regressed" => 7,
         "git_failed" | "invalid_source" | "scope_violation" => 8,
