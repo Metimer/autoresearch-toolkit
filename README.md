@@ -1,7 +1,8 @@
 # Autoresearch Toolkit
 
-Skills that guide a coding agent through measured optimization: establish a
-baseline, test one hypothesis at a time, and keep only verified improvements.
+A Rust engine and agent skills for measured optimization: establish a baseline,
+test one hypothesis at a time, and keep only verified improvements. The engine
+also runs directly from the CLI without Pi or an LLM.
 
 The workflow has two stages:
 
@@ -10,46 +11,54 @@ The workflow has two stages:
 | `autoresearch-scout` | Discover tests and benchmarks, define the scope, and establish a reproducible baseline. |
 | `autoresearch-run` | Run experiments within a defined budget, compare results, and retain validated changes. |
 
-## Requirements
+## Choose a mode
 
-- An agent that can read files, edit code, and run commands.
-- A target project under Git with executable behavior checks.
-- Python 3.10 or later for the toolkit scripts, with no third-party dependencies.
-- macOS or Linux for the measurement helper; use WSL on Windows.
+| Mode | Execution and evidence | Requirements |
+| --- | --- | --- |
+| Rust | The engine owns isolated candidates, command budgets, checks, measurements and acceptance. | An independently installed/built `autoresearch` binary, Git, Linux or macOS, and the project's command dependencies. |
+| Portable | The agent drives the loop and enforces scope/session budgets; a Python helper bounds each measurement invocation. | An agent with file/shell tools, Git and Python 3.10+ on Linux/macOS. |
 
-## Quick start
+Both modes need a target project with executable behavior checks. Use WSL on
+Windows. New skill sessions prefer a compatible engine when available; explicitly
+request portable mode if desired. The selected mode is announced. Existing
+sessions keep their mode: an absent/incompatible Rust binary blocks a Rust session
+without downloading anything or silently falling back to portable execution.
+
+## Quick start with an agent
 
 ### 1. Prepare a baseline
 
-In an agent session opened on the project you want to optimize:
+In a session opened on the project you want to optimize:
 
 > Read `/path/to/autoresearch-toolkit/skills/autoresearch-scout/SKILL.md`.
-> Prepare a performance baseline for this repository without optimizing or committing.
+> Prepare a performance baseline without optimizing or committing.
 > Goal: reduce the execution time of [command or workload].
-> Preparation budget: 10 minutes.
+> Session ceiling: 5 experiments, 20 minutes of command time and a deadline
+> 30 minutes from now. Spend at most 10 minutes on preparation.
 
-The scout identifies the project's actual commands, defines the metric and allowed
-files, then runs the checks and several rounds of measurements. It stores the
-context, methodology, and results in the target project's `.auto/` directory.
-An unstable baseline must be improved before experiments begin.
+The scout discovers real commands, defines the metric and scope, then qualifies
+the reference within those limits. A Rust session stores its immutable contract
+and evidence under the selected pilot root's `.auto/engine/sessions/`. A portable
+session stores `.auto/prompt.md`, `.auto/context.md` and baseline evidence in the
+experimental checkout. An unstable baseline blocks optimization.
 
 ### 2. Run experiments
 
-Once the baseline is validated, use an isolated checkout for experiments:
+Once the reference is qualified:
 
 > Read `/path/to/autoresearch-toolkit/skills/autoresearch-run/SKILL.md`.
-> Use the `.auto/` session prepared for this repository.
-> Run at most 5 experiments within 20 minutes, changing only the paths allowed
-> in `.auto/prompt.md`. Do not commit.
+> Optimize using the prepared session, its recorded scope and remaining limits.
+> Test one hypothesis at a time. Do not commit.
 
-The agent states a hypothesis, makes a scoped change, runs the tests, and measures
-its effect. An improvement must exceed the observed noise and preserve the
-project's behavior. Results are recorded in `.auto/portable-log.jsonl`; retained
-changes are described in `.auto/portable-state.md` for an explicit resume request.
+Rust creates private candidates from the accepted reference, evaluates sealed
+code and promotes only confirmed improvements. The portable mode requires an
+isolated experimental checkout and records results in `.auto/portable-log.jsonl`
+and retained edits in `.auto/portable-state.md`.
 
-Adjust paths and budgets to your installation and project. Preparing a baseline
-and starting experiments are separate requests. The `.auto/` files stay local
-to the target project.
+Preparation alone does not authorize optimization. Starting or resuming a run
+preserves the original deadline and remaining budget. Adjust paths and limits to
+the workload; `.auto/` evidence stays local. Neither mode creates source commits
+unless separately requested.
 
 ## Integration formats
 
@@ -80,7 +89,8 @@ The destination must be a new directory named `autoresearch-toolkit`, located
 outside the source skills directory.
 
 Each bundle contains the skills, their resources, the selected manifest, the
-README, and the license. The exporter uses an explicit file list and rejects
+README, and the license. The bundle includes both mode guides and a Rust contract
+template, but no Rust binary, source build or automatic installer. The exporter uses an explicit file list and rejects
 symbolic links in source paths. It does not overwrite an existing installation.
 If copying fails, a partial output may remain on disk; inspect it before retrying.
 
@@ -104,14 +114,19 @@ workloads. Memory, size, and throughput require a suitable measurement command.
 
 ## Execution model
 
-The agent drives the workflow. Editing scope, test protection, and the overall
-budget are instructions it must follow. The helper enforces its own measurement
-timeouts and terminates the process group it started on timeout or interruption;
-it is not a sandbox.
+In Rust mode, the engine supervises trusted commands, enforces its process budgets
+and evaluates immutable candidate snapshots. The agent proposes and edits each
+candidate; it does not assign the acceptance verdict. `history` and `report`
+read engine-owned evidence without rerunning experiments.
 
-The toolkit scripts require no API key or LLM provider connection. The agent and
-the project's commands may have their own dependencies and network requirements.
-Resuming the loop requires a new invocation.
+In portable mode, editing scope, test protection and the overall budget are
+instructions for the agent. The measurement helper enforces its invocation's
+timeouts and terminates its owned process group on timeout or interruption.
+
+Neither mode is a security sandbox. Rust currently requires `network: "allowed"`
+for execution; it rejects `"disabled"` because no network isolation backend exists.
+No API key or LLM provider is needed by the engine or toolkit scripts. Project
+commands may have their own dependencies. Resuming a loop needs a new invocation.
 
 ## Development
 
@@ -123,7 +138,8 @@ across restarts. It can also create independent Git snapshots, prepare and seal
 scoped candidates, supervise commands, qualify a reference and compare candidates
 with a separate confirmation series. Verified improvements become the next
 reference; patches can be exported without committing to the source repository.
-The Pi adapter is still planned. The skills above currently use the portable workflow.
+The Pi engine adapter is still planned. Both skills support the Rust and portable
+workflows; the Pi manifest currently loads those skills only.
 
 From a full source checkout, with Rust 1.81 or later:
 
@@ -148,7 +164,8 @@ To initialize and inspect metadata in an existing project directory:
 ```
 
 `resume` restores session metadata without launching commands. `stop` requests
-cancellation when an evaluation is running, or records a stopped session otherwise. Repeating a mutation with the same operation ID does not repeat
+cancellation when an evaluation is running, or records a stopped session otherwise.
+Repeating a mutation with the same operation ID does not repeat
 its effects; session budgets and the original deadline survive reopening.
 `autoresearch schema` prints the version 2 configuration schema.
 
@@ -190,6 +207,19 @@ so automation must inspect the decision. Use `export-candidate` as described in
 the engine guide to export code; evaluation evidence remains in the session.
 `--local-changes exclude` starts from the declared commit; `include` explicitly captures current tracked and non-ignored untracked
 files. A code export alone does not certify that a candidate passed evaluation.
+
+Inspect completed results without launching commands:
+
+```sh
+./target/debug/autoresearch history --session example-session \
+  --root /path/to/project --json
+./target/debug/autoresearch report --session example-session \
+  --root /path/to/project --json
+```
+
+`report` defaults to the qualified accepted reference. Use `--evaluation` with a
+key from `history` to inspect any completed result, including rejected trials.
+`status` includes an advisory `next_action`; it does not authorize an experiment.
 
 See [Rust engine development](docs/RUST_ENGINE.md) for the configuration contract,
 commands, recovery procedure and storage guarantees. The existing skill bundles

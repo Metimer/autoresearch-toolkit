@@ -65,9 +65,60 @@ A repeated cancellation request stays bound to its original execution.
 Its acknowledgement means cancellation was requested; inspect the completed
 evaluation or subsequent status to confirm shutdown.
 
-The Python skills retain their portable workflow. Rust `baseline` and `evaluate`
+The skills select the existing session mode; new sessions prefer a compatible
+Rust engine unless portable mode is requested. The portable workflow remains
+available without a binary. An existing Rust session never silently falls back
+to portable execution when the binary is missing or incompatible. Rust `baseline` and `evaluate`
 run the configured checks, hooks and benchmarks independently of any agent.
 Workspace commands themselves only invoke bounded Git plumbing.
+
+## Inspect results and continue
+
+```sh
+autoresearch history --session example-session --root /path/to/project --json
+autoresearch report --session example-session --root /path/to/project --json
+autoresearch report --session example-session --root /path/to/project \
+  --evaluation run-<operation-hash> --json
+```
+
+`history` returns completed evaluations sorted by completion timestamp, then key.
+Each entry contains `evaluation_key`, `operation_id`, `candidate`, `parent`,
+`decision`, `reason`, `finished_unix_ms` and the report's `sha256`. Pending executions
+appear in `status`, not as completed history entries. This is a session-local list;
+cross-session search and indexing remain planned.
+
+`report` returns the complete `evaluation` object used by baseline/evaluate, plus
+its `evaluation_key`. Without `--evaluation`, it selects the current qualified
+reference, not the latest rejected experiment. If none is qualified, use history
+to choose a completed report explicitly. An unknown selection returns
+`report_not_found` (exit 4). Every report's bytes are checked against the fingerprint
+in the journal; corruption fails the command instead of silently skipping a result.
+The raw stdout/stderr hashes are recorded in the report; inspection does not
+re-hash those separate log files or claim their current contents are unchanged.
+
+These commands accept no operation ID and neither mutate evidence nor execute
+project commands. They acquire the same exclusive session lock for a consistent
+view and return `session_busy` while an evaluation owns it. They work while stopped
+or after budget expiry. JSON uses `schema_version: 1` and `commands_executed: false`.
+
+`status` and idle lifecycle responses add the advisory `next_action` field:
+
+| Value | Meaning |
+| --- | --- |
+| `inspect_recovery` | Inspect interrupted execution/evidence before retrying or abandoning work. |
+| `check_clock` | Resolve a regressed wall clock before further mutations. |
+| `report_or_export` | An attempt/time limit or deadline is exhausted. |
+| `resume_if_authorized` | The session is stopped and still has budget. |
+| `workspace` | Capture source with an explicit local-changes policy. |
+| `baseline` | Qualify the current reference before trials. |
+| `prepare_or_evaluate_if_authorized` | Continue a candidate within the existing authorization and remaining limits. |
+
+Hints do not guarantee the next command will pass its filesystem/process gates,
+and never grant authorization. `doctor` advertises `inspect_evaluations` for hosts
+using these views. Skills require JSON version 1 plus `run_experiments` and
+`inspect_evaluations`; they neither install a missing binary nor migrate formats.
+The shipped skill template matches `examples/session.json`. Its placeholders and
+network policy require deliberate configuration before execution.
 
 ## Configuration version 2
 
@@ -469,7 +520,7 @@ it does not imply `kept`. Inspect `evaluation.report.decision` (`qualified`, `ke
 | 1 | Filesystem I/O failed. |
 | 2 | Invalid arguments, identifier or configuration. |
 | 3 | Unsupported session platform, or `doctor` could not find Git on a supported platform. |
-| 4 | Conflicting operation, session lock busy, or missing/stale baseline. |
+| 4 | Conflicting operation, session lock busy, missing/stale baseline, or unavailable report. |
 | 5 | Corrupt session/artifact, unsafe path, storage limit or failed state projection. |
 | 6 | Attempt/time budget or original deadline exhausted. |
 | 7 | Clock moved backwards or outside the supported range. |
@@ -507,5 +558,10 @@ Execution tests also cover descendant cleanup, TERM resistance, bounded output,
 stop/SIGTERM cancellation, noisy references, constraints, confirmation failure,
 atomic evidence recovery and promotion followed by regression.
 
-Next comes CLI/skill integration (lot 7), followed by the Pi adapter, historical
-import, full result bundles and release packaging. See `IMPLEMENTATION_PLAN.md`.
+Both skills now include separate Rust/portable guides, with complete resources
+in each host bundle. CLI acceptance covers a separate pilot, executable/config/
+source/export paths containing spaces and Unicode, qualification, promotion,
+regression, inspection and stop/resume without Pi or an LLM.
+
+Next comes historical import and recovery (lot 8), then the Pi adapter, full result
+bundles and release packaging. See `IMPLEMENTATION_PLAN.md`.

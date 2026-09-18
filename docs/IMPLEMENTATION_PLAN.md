@@ -1,8 +1,8 @@
 # Plan d’implémentation — Autoresearch Toolkit
 
-Statut : lots 0–6 implémentés pour une exécution locale de confiance sur POSIX.
+Statut : lots 0–7 implémentés pour une exécution locale de confiance sur POSIX.
 Supervision, qualification, comparaisons confirmées et promotion atomique sont
-disponibles. Prochaine tranche : intégration CLI/skills (lot 7). Les limites
+disponibles et intégrés aux skills. Prochaine tranche : migration/reprise (lot 8). Les limites
 d’isolation, de quotas et de preuve sont détaillées dans `RUST_ENGINE.md`.
 Référence de départ : commit `130f305`, version du toolkit `0.1.0`.
 Responsable du projet et des nouvelles contributions : Metimer.
@@ -289,22 +289,26 @@ d’un ensemble de compromis multi-objectifs vient après le moteur à objectif 
 
 ## 9. API et commandes cibles
 
-Les noms suivants sont proposés ; ces commandes n’existent pas encore.
+Les commandes de session, d’évaluation et de consultation ci-dessous sont
+implémentées. Import, bundle complet de résultats et nettoyage restent des cibles.
+Les mutations exigent `--operation-id` ; `--root` choisit le projet pilote.
 
 | Commande | Effet et condition |
 | --- | --- |
 | `autoresearch doctor` | Vérifie les capacités locales et les prérequis, sans installer de dépendances. |
-| `autoresearch init --config <fichier>` | Valide le contrat et prépare une session et son espace déclaré. |
+| `autoresearch init --config <fichier>` | Valide et fige le contrat ; `workspace` capture ensuite la source. |
 | `autoresearch baseline --session <id>` | Exécute les vérifications et qualifie la référence. |
-| `autoresearch prepare --session <id> --hypothesis <texte>` | Réserve une tentative et renvoie le chemin candidat et ses règles. |
-| `autoresearch seal --experiment <id>` | Capture le candidat, son patch et ses empreintes après les éditions. |
-| `autoresearch run --experiment <id>` | Exécute le candidat scellé, calcule la décision et promeut un gain valide. |
+| `autoresearch workspace --session <id> --local-changes <exclude/include>` | Capture la source dans un snapshot indépendant. |
+| `autoresearch prepare-candidate --session <id> --candidate <id> --hypothesis <texte>` | Renvoie le chemin éditable depuis la référence acceptée ; aucune tentative consommée. |
+| `autoresearch seal --session <id> --candidate <id>` | Capture le candidat, son patch et ses empreintes après les éditions. |
+| `autoresearch evaluate --session <id> --candidate <id>` | Exécute le candidat scellé, calcule la décision et promeut un gain valide. |
 | `autoresearch status --session <id>` | Affiche état, budget, preuves et action suivante. |
 | `autoresearch stop --session <id>` | Demande l’annulation à son superviseur et empêche une nouvelle tentative. |
 | `autoresearch resume --session <id>` | Réconcilie les preuves et les budgets ; ne démarre pas seul une hypothèse. |
-| `autoresearch history --session <id>` | Recherche les expériences et leurs raisons de décision. |
-| `autoresearch report --session <id>` | Produit une synthèse locale à partir des faits du journal. |
-| `autoresearch export-result --session <id> --output <dossier>` | Exporte patch, preuves sélectionnées et reproduction dans un nouveau dossier. |
+| `autoresearch history --session <id>` | Liste les évaluations terminées et leurs raisons ; recherche indexée future. |
+| `autoresearch report --session <id>` | Lit le rapport de la référence qualifiée ou une évaluation explicitement choisie. |
+| `autoresearch export-candidate --session <id> --candidate <id> --output <dossier>` | Exporte le code reproductible sans attestation de performance. |
+| `autoresearch export-result --session <id> --output <dossier>` | Cible lot 10 : patch, preuves sélectionnées et reproduction. |
 | `autoresearch import-legacy --source <chemin>` | Importe une session ancienne dans une nouvelle session, sans activer la boucle. |
 | `autoresearch gc --session <id> --dry-run` | Liste les espaces possédés pouvant être nettoyés ; suppression séparée explicite. |
 
@@ -659,7 +663,7 @@ complets de résultats relèvent du lot 10.
   terminé, y compris après écriture du rapport avant l’événement de décision.
 - CLI `baseline` et `evaluate` utilisables sans Pi ni agent ; `stop` peut demander
   l’arrêt d’un superviseur détenant le verrou. JSON et README anglais documentés.
-  La mise à jour des skills et l’élargissement de la CLI restent au lot 7.
+  Le lot 7 ci-dessous complète les skills et la consultation de résultats.
 - Tests : référence bruitée, amélioration puis régression, contraintes secondaires,
   confirmation échouée, modification interdite, quotas, caches, reprise de preuve,
   projection manquante, arrêt CLI/SIGTERM et descendants résistant à TERM.
@@ -671,3 +675,26 @@ Les groupes échappés, dépendances transitives et fichiers externes ne sont pa
 isolés. Les tests sont vérifiés localement sur macOS ; la matrice CI distante reste
 à exécuter après création du dépôt distant. Aucun commit n’est créé dans la source
 optimisée, et les archives tierces conservent leurs licences.
+
+### Avancement du lot 7 — CLI et skills
+
+- `history` liste les évaluations terminées ; `report` expose le rapport lié au
+  journal, avec sélection explicite ou référence qualifiée par défaut. Consultation
+  sans mutation ni commande projet ; une preuve corrompue bloque la lecture.
+- `status` ajoute une suggestion `next_action`, sans autoriser une expérience.
+  `doctor` expose la capacité `inspect_evaluations`. Aide et contrat JSON version 1
+  documentés, codes de sortie conservés ; un rejet métier reste une opération réussie.
+- Les deux skills distinguent préparation, autorisation, budget et reprise ; parcours
+  moteur et portable séparés en références embarquées. Une session existante garde
+  son mode. Un binaire absent/incompatible bloque le mode Rust, sans téléchargement
+  ni installation automatique. Le mode portable reste disponible sans ce binaire.
+- Template de contrat Rust inclus dans le skill scout et inventaire d’export mis à
+  jour pour les cinq hôtes. Les liens des références exportées et la cohérence du
+  template sont vérifiés ; aucun binaire n’est embarqué.
+- Acceptation CLI depuis un répertoire neuf, avec binaire, source, configuration,
+  pilote et export aux chemins contenant espaces/Unicode. Qualification, gain
+  confirmé, régression, historique, rapport, arrêt/reprise et export sont exercés.
+  La source reste inchangée. Tests de lecture sans écriture et de preuve corrompue.
+
+La migration de journaux historiques relève du lot 8 ; la recherche multi-session,
+les bundles de preuves et la distribution du binaire restent aux lots suivants.
