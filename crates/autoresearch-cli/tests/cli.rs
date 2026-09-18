@@ -941,3 +941,253 @@ fn standalone_acceptance_uses_unicode_paths_and_preserves_source_and_evidence() 
     );
     assert_eq!(run(&["status"])["session"]["state"]["attempts_used"], 2);
 }
+
+#[test]
+fn legacy_cli_inspects_imports_and_exposes_only_unverified_history() {
+    let fixture = Fixture::named("import été historique");
+    let source = fixture.0.join("archive Pi.jsonl");
+    let bytes = include_bytes!("../../../tests/fixtures/legacy/pi.jsonl");
+    fs::write(&source, bytes).unwrap();
+    session_config(&fixture);
+    let config = "config.json";
+    let raw = |args: &[&str]| fixture.cli().args(args).arg("--json").output().unwrap();
+    let inspected = raw(&["inspect-legacy", "--source", source.to_str().unwrap()]);
+    assert!(inspected.status.success(), "{inspected:?}");
+    assert_eq!(
+        body(&inspected)["import_report"]["source_profile"],
+        "pi_unversioned"
+    );
+    assert_eq!(body(&inspected)["session_created"], false);
+    assert!(!fixture.0.join(".auto").exists());
+    let args = [
+        "import-legacy",
+        "--source",
+        source.to_str().unwrap(),
+        "--config",
+        config,
+        "--operation-id",
+        "import",
+    ];
+    let imported = raw(&args);
+    assert!(imported.status.success(), "{imported:?}");
+    assert_eq!(body(&imported)["commands_executed"], false);
+    assert_eq!(body(&imported)["qualification_required"], true);
+    assert_eq!(body(&imported)["session"]["state"]["accepted"], Value::Null);
+    let id = body(&imported)["session"]["state"]["session_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let path = fixture.0.join(".auto/engine/sessions").join(&id);
+    let journal = fs::read(path.join("events.jsonl")).unwrap();
+    assert!(raw(&args).status.success());
+    assert_eq!(fs::read(path.join("events.jsonl")).unwrap(), journal);
+    let history = raw(&["history", "--session", &id]);
+    assert!(history.status.success());
+    assert_eq!(body(&history)["evaluations"], json!([]));
+    assert_eq!(
+        body(&history)["historical_import"]["trust"],
+        "historical_unverified"
+    );
+    let report = raw(&["report", "--session", &id, "--legacy"]);
+    assert!(report.status.success());
+    assert_eq!(
+        body(&report)["legacy_import"]["report"]["entries"][1]["declared"]["status"],
+        "keep"
+    );
+    assert_eq!(raw(&["report", "--session", &id]).status.code(), Some(4));
+    assert_eq!(
+        raw(&[
+            "report",
+            "--session",
+            &id,
+            "--legacy",
+            "--evaluation",
+            "run-test"
+        ])
+        .status
+        .code(),
+        Some(2)
+    );
+    assert_eq!(fs::read(path.join("events.jsonl")).unwrap(), journal);
+    assert_eq!(fs::read(&source).unwrap(), bytes);
+    assert!(!fixture.0.join("must-not-execute").exists());
+    fs::write(&source, b"{broken\n").unwrap();
+    let rejected = raw(&args);
+    assert_eq!(rejected.status.code(), Some(2));
+    assert_eq!(body(&rejected)["import_report"]["importable"], false);
+    assert_eq!(fs::read(path.join("events.jsonl")).unwrap(), journal);
+    assert_eq!(fs::read(path.join("legacy/source.jsonl")).unwrap(), bytes);
+}
+
+#[test]
+fn legacy_rejection_and_usage_errors_do_not_create_sessions() {
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.0.join("bad.jsonl"),
+        b"{\"iteration\":1,\"decision\":\"unknown\"}\n",
+    )
+    .unwrap();
+    session_config(&fixture);
+    let config = "config.json";
+    for args in [
+        vec!["inspect-legacy", "--source", "bad.jsonl"],
+        vec![
+            "import-legacy",
+            "--source",
+            "bad.jsonl",
+            "--config",
+            config,
+            "--operation-id",
+            "import",
+        ],
+        vec!["import-legacy", "--source", "bad.jsonl"],
+        vec![
+            "inspect-legacy",
+            "--source",
+            "bad.jsonl",
+            "--format",
+            "unknown",
+        ],
+        vec![
+            "inspect-legacy",
+            "--source",
+            "bad.jsonl",
+            "--source",
+            "bad.jsonl",
+        ],
+        vec![
+            "inspect-legacy",
+            "--source",
+            "bad.jsonl",
+            "--operation-id",
+            "no",
+        ],
+    ] {
+        let out = fixture.cli().args(args).arg("--json").output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{out:?}");
+        assert!(!fixture.0.join(".auto").exists());
+    }
+}
+
+#[test]
+fn abrupt_supervisor_death_blocks_resume_until_the_owned_group_exits() {
+    use std::{
+        process::Stdio,
+        time::{Duration, Instant},
+    };
+    let fixture = Fixture::new();
+    let id = source_fixture(&fixture);
+    let path = fixture.0.join("workspace.json");
+    let mut config: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    config["execution"]["network"] = json!("allowed");
+    config["checks"] = json!([{"executable":"/bin/sh", "args":["-c","exit 0"], "cwd":"."}]);
+    config["benchmark"] = json!({"executable":"/bin/sh", "args":["-c","mkdir -p build; printf ready > build/started; exec /bin/sleep 2"], "cwd":"."});
+    config["budget"]["command_timeout_seconds"] = json!(3);
+    fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+    let raw = |args: &[&str]| fixture.cli().args(args).arg("--json").output().unwrap();
+    assert!(raw(&[
+        "init",
+        "--config",
+        "workspace.json",
+        "--operation-id",
+        "init"
+    ])
+    .status
+    .success());
+    assert!(raw(&[
+        "workspace",
+        "--session",
+        &id,
+        "--local-changes",
+        "exclude",
+        "--operation-id",
+        "workspace"
+    ])
+    .status
+    .success());
+    let mut host = fixture
+        .cli()
+        .args([
+            "baseline",
+            "--session",
+            &id,
+            "--operation-id",
+            "interrupted",
+            "--json",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let session_path = fixture.0.join(".auto/engine/sessions").join(&id);
+    let start = Instant::now();
+    loop {
+        let started = fs::read(session_path.join("active.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .and_then(|v| v["token"].as_str().map(str::to_owned))
+            .is_some_and(|token| {
+                session_path
+                    .join("executions")
+                    .join(format!("run-{token}"))
+                    .join("reference/build/started")
+                    .exists()
+            });
+        let identified = fs::read(session_path.join("process.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .is_some_and(|marker| marker["group_pid"].as_u64().is_some());
+        if started && identified {
+            break;
+        }
+        if host.try_wait().unwrap().is_some() {
+            panic!(
+                "benchmark exited before starting: {:?}",
+                host.wait_with_output().unwrap()
+            );
+        }
+        if start.elapsed() > Duration::from_secs(10) {
+            let _ = host.kill();
+            let _ = host.wait();
+            panic!("benchmark did not start");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    host.kill().unwrap();
+    host.wait().unwrap();
+    let before = raw(&["status", "--session", &id]);
+    assert!(before.status.success(), "{before:?}");
+    let before = body(&before);
+    assert_eq!(before["session"]["recovery_required"], true);
+    let resume = ["resume", "--session", &id, "--operation-id", "recover"];
+    let blocked = raw(&resume);
+    assert_eq!(blocked.status.code(), Some(5), "{blocked:?}");
+    assert_eq!(body(&blocked)["error"]["code"], "recovery_required");
+    // The abandoned child exits naturally; recovery itself must never signal its PID.
+    let resumed = loop {
+        let out = raw(&resume);
+        if out.status.success() {
+            break body(&out);
+        }
+        assert_eq!(body(&out)["error"]["code"], "recovery_required");
+        assert!(start.elapsed() < Duration::from_secs(10), "{out:?}");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert_eq!(
+        resumed["session"]["state"]["active_ms_used"],
+        before["session"]["state"]["active_ms_used"]
+    );
+    assert_eq!(
+        resumed["session"]["deadline_unix_ms"],
+        before["session"]["deadline_unix_ms"]
+    );
+    assert_eq!(resumed["session"]["state"]["attempts_used"], 0);
+    assert_eq!(resumed["session"]["state"]["accepted"], Value::Null);
+    assert_eq!(resumed["session"]["state"]["qualification"], Value::Null);
+    assert_eq!(resumed["session"]["recovery_required"], false);
+    assert!(!session_path.join("process.json").exists());
+    assert_eq!(
+        body(&raw(&["history", "--session", &id]))["evaluations"],
+        json!([])
+    );
+}

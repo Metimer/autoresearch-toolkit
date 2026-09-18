@@ -25,7 +25,17 @@ pub fn inspect(
     guard: &SessionGuard,
     command: &str,
     selected: Option<&str>,
+    historical: bool,
 ) -> Result<(Value, String), SessionError> {
+    if historical {
+        let report = guard.legacy_report()?.ok_or_else(|| SessionError {
+            code: "report_not_found",
+            message: "session has no historical import".into(),
+        })?;
+        return Ok((json!({"schema_version":1, "command":"report", "ok":true,
+            "legacy_import":{"sha256":guard.state().legacy_import, "report":report},
+            "commands_executed":false}), format!("Historical import (unverified)\nSource SHA-256: {}\nEntries: {}\nNo historical outcome is current proof.",report.source_sha256,report.entries.len())));
+    }
     if command == "report" {
         let key = selected
             .or(guard.state().qualification.as_deref())
@@ -90,7 +100,7 @@ pub fn inspect(
                     .cmp(&b["evaluation_key"].as_str())
             })
     });
-    let text = if rows.is_empty() {
+    let mut text = if rows.is_empty() {
         "No completed evaluations.".into()
     } else {
         rows.iter()
@@ -106,10 +116,22 @@ pub fn inspect(
             .collect::<Vec<_>>()
             .join("\n")
     };
+    let historical = guard.legacy_report()?.map(|report| {
+        json!({
+            "sha256":guard.state().legacy_import, "trust":report.trust,
+            "source_profile":report.source_profile, "entries":report.entries.len(),
+        })
+    });
+    if let Some(imported) = &historical {
+        text.push_str(&format!(
+            "\nHistorical import: {} unverified entries; use report --legacy.",
+            imported["entries"]
+        ));
+    }
     Ok((
         json!({"schema_version":1, "command":"history", "ok":true,
         "session_id":guard.state().session_id, "accepted":guard.state().accepted,
-        "qualification":guard.state().qualification, "evaluations":rows,
+        "qualification":guard.state().qualification, "evaluations":rows, "historical_import":historical,
         "commands_executed":false}),
         text,
     ))

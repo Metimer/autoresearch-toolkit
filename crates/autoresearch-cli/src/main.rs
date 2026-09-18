@@ -1,4 +1,5 @@
 mod inspection;
+mod legacy;
 
 use autoresearch_core::{
     session::{SessionError, SessionStore},
@@ -21,10 +22,12 @@ Usage:
   autoresearch doctor [--json]
   autoresearch validate --config <file> [--json]
   autoresearch schema
+  autoresearch inspect-legacy --source <jsonl> [--format <auto|pi|portable>] [--json]
+  autoresearch import-legacy --source <jsonl> --config <file> --operation-id <id> [--format <auto|pi|portable>] [--root <dir>] [--json]
   autoresearch init --config <file> --operation-id <id> [--root <dir>] [--json]
   autoresearch status --session <id> [--root <dir>] [--json]
   autoresearch history --session <id> [--root <dir>] [--json]
-  autoresearch report --session <id> [--evaluation <run-key>] [--root <dir>] [--json]
+  autoresearch report --session <id> [--evaluation <run-key> | --legacy] [--root <dir>] [--json]
   autoresearch resume --session <id> --operation-id <id> [--root <dir>] [--repair-tail] [--json]
   autoresearch stop --session <id> --operation-id <id> [--root <dir>] [--json]
   autoresearch workspace --session <id> --local-changes <exclude|include> --operation-id <id> [--root <dir>] [--json]
@@ -43,6 +46,7 @@ Session commands persist metadata below the explicit root (default: current dire
 Use the same operation ID to retry a mutation; use a new ID for a new operation.
 baseline qualifies the captured reference; evaluate checks and measures a sealed candidate.
 stop requests cancellation when a supervisor owns the session lock.
+import-legacy creates a new session with inert history; no commands or old verdicts are resumed.
 history lists completed evaluations; report defaults to the qualified accepted reference.
 Read evaluation.report.decision: exit zero also covers rejected or cancelled evaluations.
 Workspace commands use isolated Git plumbing and never run project commands.
@@ -87,6 +91,9 @@ fn main() -> ExitCode {
                     .expect("schema is serializable")
             );
             ExitCode::SUCCESS
+        }
+        [command, rest @ ..] if command == "inspect-legacy" || command == "import-legacy" => {
+            legacy::command(command.to_str().unwrap(), rest, as_json)
         }
         [command, rest @ ..]
             if [
@@ -151,7 +158,7 @@ fn doctor(as_json: bool) -> ExitCode {
         "platform": {"os": env::consts::OS, "arch": env::consts::ARCH, "supported": supported},
         "git_on_path": git_found,
         "git_version_verified": false,
-        "capabilities": {"validate_config": true, "manage_sessions": supported, "isolated_workspaces": supported && git_found, "run_experiments": supported && git_found, "pi_adapter": false, "inspect_evaluations": supported}
+        "capabilities": {"validate_config": true, "manage_sessions": supported, "isolated_workspaces": supported && git_found, "run_experiments": supported && git_found, "pi_adapter": false, "inspect_evaluations": supported, "import_legacy": supported}
     }), &format!(
         "Autoresearch {}\nPlatform: {} / {} (supported: {})\nGit executable on PATH: {} (version not verified)\nAvailable: configuration validation, persistent sessions and isolated snapshots. Trusted command supervision and paired evaluations are available.",
         env!("CARGO_PKG_VERSION"), env::consts::OS, env::consts::ARCH, supported, git_found
@@ -239,6 +246,7 @@ struct SessionArgs {
     local_changes: Option<LocalChanges>,
     output: Option<PathBuf>,
     evaluation: Option<String>,
+    legacy: bool,
 }
 
 fn is_read_only(command: &str) -> bool {
@@ -249,6 +257,10 @@ fn session_args(command: &str, args: &[OsString]) -> Result<SessionArgs, &'stati
     let mut parsed = SessionArgs::default();
     let mut iter = args.iter();
     while let Some(flag) = iter.next() {
+        if flag == "--legacy" && command == "report" && !parsed.legacy {
+            parsed.legacy = true;
+            continue;
+        }
         if flag == "--repair-tail" && command == "resume" && !parsed.repair {
             parsed.repair = true;
             continue;
@@ -311,6 +323,7 @@ fn session_args(command: &str, args: &[OsString]) -> Result<SessionArgs, &'stati
             && parsed.candidate.is_none())
         || (command == "prepare-candidate" && parsed.hypothesis.is_none())
         || (command == "export-candidate" && parsed.output.is_none())
+        || (parsed.legacy && parsed.evaluation.is_some())
     {
         return Err("missing required session option; use --help");
     }
@@ -381,7 +394,7 @@ fn session_command(command: &str, args: &[OsString], as_json: bool) -> ExitCode 
         Err(issue) => return session_error(as_json, issue),
     };
     if ["history", "report"].contains(&command) {
-        return match inspection::inspect(&guard, command, args.evaluation.as_deref()) {
+        return match inspection::inspect(&guard, command, args.evaluation.as_deref(), args.legacy) {
             Ok((value, text)) => {
                 emit(as_json, value, &text);
                 ExitCode::SUCCESS
@@ -479,7 +492,11 @@ fn session_command(command: &str, args: &[OsString], as_json: bool) -> ExitCode 
 
 fn session_error(as_json: bool, issue: SessionError) -> ExitCode {
     let exit = match issue.code {
-        "invalid_config" | "invalid_identifier" | "invalid_protocol" | "invalid_environment" => 2,
+        "invalid_config"
+        | "invalid_identifier"
+        | "invalid_protocol"
+        | "invalid_environment"
+        | "invalid_legacy" => 2,
         "unsupported" => 3,
         "conflict" | "session_busy" | "source_changed" | "baseline_required" | "baseline_stale"
         | "report_not_found" => 4,
