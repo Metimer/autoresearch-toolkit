@@ -96,6 +96,8 @@ pub struct SessionState {
     pub execution: Option<Execution>,
     #[serde(default)]
     pub evaluated: BTreeMap<String, String>,
+    #[serde(default)]
+    pub legacy_import: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -136,6 +138,10 @@ enum Event {
     },
     Created {
         config_sha256: String,
+    },
+    Imported {
+        config_sha256: String,
+        import_sha256: String,
     },
     Resumed,
     Stopped,
@@ -234,6 +240,32 @@ impl SessionStore {
         operation_id: &str,
         now: u64,
     ) -> Result<SessionGuard> {
+        self.initialize(config, operation_id, now, None)
+    }
+
+    pub fn import_legacy(
+        &self,
+        config: ValidatedConfig,
+        operation_id: &str,
+        prepared: &crate::legacy::PreparedImport,
+        now: u64,
+    ) -> Result<SessionGuard> {
+        if !prepared.report().importable {
+            return Err(SessionError::new(
+                "invalid_legacy",
+                "inspect and resolve historical journal anomalies before importing",
+            ));
+        }
+        self.initialize(config, operation_id, now, Some(prepared))
+    }
+
+    fn initialize(
+        &self,
+        config: ValidatedConfig,
+        operation_id: &str,
+        now: u64,
+        imported: Option<&crate::legacy::PreparedImport>,
+    ) -> Result<SessionGuard> {
         identifier(operation_id)?;
         let directory = self.directory(true)?;
         // Serialize publication; the stable lock files must never be removed.
@@ -242,6 +274,31 @@ impl SessionStore {
         let bytes = serde_json::to_vec(config.get())
             .map_err(|e| SessionError::new("invalid_config", e.to_string()))?;
         let digest = hash(&bytes);
+        let historical = imported.map(|source| source.report_bytes()).transpose()?;
+        if let (Some(source), Some(report)) = (imported, &historical) {
+            let needed = source
+                .report()
+                .source_bytes
+                .saturating_add(report.len())
+                .saturating_add(bytes.len() * 2)
+                .saturating_add(65536);
+            if needed as u64 > config.get().budget.max_artifact_bytes {
+                return Err(SessionError::new(
+                    "storage_limit",
+                    "historical source and report exceed the session storage budget",
+                ));
+            }
+        }
+        let created = if let Some(report) = &historical {
+            Event::Imported {
+                config_sha256: digest.clone(),
+                import_sha256: hash(report),
+            }
+        } else {
+            Event::Created {
+                config_sha256: digest.clone(),
+            }
+        };
         let exists = match path.symlink_metadata() {
             Ok(_) => true,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
@@ -250,10 +307,7 @@ impl SessionStore {
         if exists {
             let mut guard = self.open(&config.get().session_id, false)?;
             if guard.state.config_sha256 == digest
-                && guard.operations.get(operation_id)
-                    == Some(&Event::Created {
-                        config_sha256: digest,
-                    })
+                && guard.operations.get(operation_id) == Some(&created)
             {
                 guard.confirm_committed()?;
                 guard.save_projection()?;
@@ -292,6 +346,7 @@ impl SessionStore {
                 qualification: None,
                 execution: None,
                 evaluated: BTreeMap::new(),
+                legacy_import: None,
             },
             previous_hash: String::new(),
             operations: HashMap::new(),
@@ -300,13 +355,10 @@ impl SessionStore {
             projection_current: false,
         };
         write_new(&guard.path.join("events.jsonl"), b"")?;
-        guard.record(
-            operation_id,
-            now,
-            Event::Created {
-                config_sha256: digest,
-            },
-        )?;
+        if let (Some(source), Some(report)) = (imported, &historical) {
+            source.write(&staging.path().join("legacy"), report)?;
+        }
+        guard.record(operation_id, now, created)?;
         sync_directory(staging.path())?;
         // Under the publication lock a cooperating initializer cannot race this rename.
         fs::rename(staging.path(), &path)?;
@@ -369,7 +421,7 @@ impl SessionStore {
         }
         let (state, previous_hash, operations) = replay(&config, &bytes)?;
         let projection_current = projection_matches(&path, &state)?;
-        Ok(SessionGuard {
+        let guard = SessionGuard {
             path,
             _lock: lock,
             config,
@@ -379,7 +431,9 @@ impl SessionStore {
             journal_bytes: bytes.len(),
             uncertain: false,
             projection_current,
-        })
+        };
+        guard.legacy_report()?;
+        Ok(guard)
     }
 }
 
@@ -702,7 +756,9 @@ fn apply(state: &mut SessionState, config: &SessionConfig, record: &Record) -> R
             Ok(())
         }
     };
-    if state.sequence == 0 && !matches!(record.event, Event::Created { .. }) {
+    if state.sequence == 0
+        && !matches!(record.event, Event::Created { .. } | Event::Imported { .. })
+    {
         return Err(SessionError::new(
             "corrupt_session",
             "first event must initialize the session",
@@ -862,7 +918,7 @@ fn apply(state: &mut SessionState, config: &SessionConfig, record: &Record) -> R
             }
             state.artifacts.insert(key.clone(), sha256.clone());
         }
-        Event::Created { config_sha256 } => {
+        Event::Created { config_sha256 } | Event::Imported { config_sha256, .. } => {
             if state.sequence != 0 || config_sha256 != &state.config_sha256 {
                 return Err(SessionError::new(
                     "corrupt_session",
@@ -870,6 +926,17 @@ fn apply(state: &mut SessionState, config: &SessionConfig, record: &Record) -> R
                 ));
             }
             state.session_id = config.session_id.clone();
+            if let Event::Imported { import_sha256, .. } = &record.event {
+                if import_sha256.len() != 64
+                    || !import_sha256.bytes().all(|b| b.is_ascii_hexdigit())
+                {
+                    return Err(SessionError::new(
+                        "corrupt_session",
+                        "invalid historical report fingerprint",
+                    ));
+                }
+                state.legacy_import = Some(import_sha256.clone());
+            }
         }
         Event::Resumed => {
             ensure_budget()?;
@@ -965,6 +1032,7 @@ fn replay(config: &ValidatedConfig, bytes: &[u8]) -> Result<Replay> {
         qualification: None,
         execution: None,
         evaluated: BTreeMap::new(),
+        legacy_import: None,
     };
     let mut previous = String::new();
     let mut operations = HashMap::new();

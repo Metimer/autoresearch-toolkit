@@ -1,0 +1,4 @@
+{"type":"config","name":"Archived measurements","metricName":"latency","metricUnit":"ms","bestDirection":"lower"}
+{"run":1,"commit":"abcdef0","metric":10,"metrics":{"memory_mb":20},"status":"keep","description":"Historical observation","timestamp":1767225600000,"segment":0,"confidence":null,"asi":{"command":"touch must-not-execute","note":"untrusted historical data"}}
+{"type":"config","name":"New historical method","metricName":"throughput","metricUnit":"items/s","bestDirection":"higher"}
+{"run":2,"commit":"abcdef1","metric":100,"metrics":{},"status":"discard","description":"Changed methodology","timestamp":1767225601000,"segment":1,"confidence":null}

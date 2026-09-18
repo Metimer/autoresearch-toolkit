@@ -491,3 +491,90 @@ fn a_stop_retry_does_not_cancel_a_different_execution() {
         "subsequent"
     );
 }
+
+#[test]
+fn historical_keep_cannot_qualify_or_promote_code_without_new_measurements() {
+    use autoresearch_core::legacy::{LegacyFormat, PreparedImport};
+    let f = Fixture::new(BENCH);
+    let prepared = PreparedImport::parse(
+        include_bytes!("../../../tests/fixtures/legacy/pi.jsonl"),
+        LegacyFormat::Auto,
+    )
+    .unwrap();
+    let store = SessionStore::new(&f.root).unwrap();
+    let mut session = store
+        .import_legacy(f.config.clone(), "import", &prepared, 1)
+        .unwrap();
+    assert!(session.state().accepted.is_none());
+    session
+        .create_workspace("workspace", LocalChanges::Exclude, 2)
+        .unwrap();
+    candidate(&mut session, "fast", "5");
+    assert_eq!(
+        session
+            .evaluate_candidate("trial-before-baseline", "fast")
+            .unwrap_err()
+            .code,
+        "baseline_required"
+    );
+    assert_eq!(session.state().attempts_used, 0);
+    assert_eq!(session.state().active_ms_used, 0);
+    assert_eq!(
+        session.baseline("baseline").unwrap().report.decision,
+        Decision::Qualified
+    );
+    assert_eq!(
+        session
+            .evaluate_candidate("trial", "fast")
+            .unwrap()
+            .report
+            .decision,
+        Decision::Kept
+    );
+    assert_eq!(session.state().attempts_used, 1);
+    assert_eq!(
+        session.legacy_report().unwrap().unwrap().entries[1].trust,
+        "historical_unverified"
+    );
+}
+
+#[test]
+fn resuming_after_timeout_keeps_charged_time_and_requires_explicit_new_work() {
+    let temp = tempfile::tempdir().unwrap();
+    let ready = temp.path().join("ready");
+    let bench = format!(
+        "import time\nfrom pathlib import Path\nif not Path({:?}).exists(): time.sleep(2)\n{BENCH}",
+        ready.to_str().unwrap()
+    );
+    let mut f = Fixture::new(&bench);
+    let mut config = f.config.get().clone();
+    config.budget.command_timeout_seconds = 1;
+    f.config = ValidatedConfig::try_from(config).unwrap();
+    let mut session = f.session();
+    let result = session.baseline("timeout").unwrap();
+    assert_eq!(result.report.reason, "command_timeout");
+    let used = session.state().active_ms_used;
+    let deadline = session.config().budget.deadline_unix_ms;
+    session
+        .stop("stop", autoresearch_core::supervisor::now_ms().unwrap())
+        .unwrap();
+    drop(session);
+    let mut session = f.reopen();
+    session
+        .resume("resume", autoresearch_core::supervisor::now_ms().unwrap())
+        .unwrap();
+    assert_eq!(session.state().active_ms_used, used);
+    assert_eq!(session.config().budget.deadline_unix_ms, deadline);
+    assert!(session.state().qualification.is_none());
+    assert_eq!(
+        session.baseline("timeout").unwrap().report.reason,
+        "command_timeout"
+    );
+    assert_eq!(session.state().active_ms_used, used);
+    fs::write(ready, "ready").unwrap();
+    assert_eq!(
+        session.baseline("new-baseline").unwrap().report.decision,
+        Decision::Qualified
+    );
+    assert!(session.state().active_ms_used > used);
+}
