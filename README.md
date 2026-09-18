@@ -128,6 +128,29 @@ for execution; it rejects `"disabled"` because no network isolation backend exis
 No API key or LLM provider is needed by the engine or toolkit scripts. Project
 commands may have their own dependencies. Resuming a loop needs a new invocation.
 
+## Import historical journals
+
+Pi and portable JSONL journals can be retained in a new Rust session as unverified
+history. Inspect the source before importing:
+
+```sh
+autoresearch inspect-legacy --source /path/to/old-log.jsonl --json
+autoresearch import-legacy --source /path/to/old-log.jsonl \
+  --config /path/to/new-session.json --root /path/to/pilot \
+  --operation-id import-001 --json
+autoresearch report --session imported-session --root /path/to/pilot --legacy --json
+```
+
+Use the new configuration's session ID in the last command. The source stays
+unchanged; import requires a new session ID and explicit version 2 contract and
+budgets. Unknown statuses, malformed records and unsupported versions block import.
+No old script, verdict or uncommitted edit is resumed. Capture source and qualify
+it again before optimization; historical `keep` never means engine `kept`.
+
+The [engine guide](docs/RUST_ENGINE.md#historical-import) documents supported
+profiles, limits and recovery after interruption. Ordinary Rust sessions retain
+their existing budgets through `resume`; import is a separate operation.
+
 ## Development
 
 ### Rust engine

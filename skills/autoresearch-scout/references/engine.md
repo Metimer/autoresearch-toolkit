@@ -6,6 +6,28 @@ paths containing spaces. In the examples, `$engine` is its absolute path, `$pilo
 is an existing directory for local session storage, and `$session` is the chosen
 ASCII session ID. The pilot can be outside the source repository.
 
+## Explicit historical migration
+
+Only migrate when requested; discovering an old journal is not permission to
+replace its workflow or budget. Require `doctor` capability `import_legacy`.
+`inspect-legacy --source <jsonl> --json` reads it without creating a session and
+returns line-numbered anomalies. Blocking errors prohibit import. Preserve the
+original even when preparing a corrected copy; never silently remove invalid lines.
+
+With an explicitly authorized new version 2 contract, unique session ID and limits:
+
+```sh
+"$engine" import-legacy --source "$legacy_journal" --config "$new_config" \
+  --root "$pilot" --operation-id import-001 --json
+"$engine" report --session "$session" --root "$pilot" --legacy --json
+```
+
+The new session retains historical data only. It does not carry forward an old
+`keep`, scripts, code edits, process state or budgets. Continue with workspace
+capture and fresh qualification below; do not call init again for that imported
+session. Existing Rust sessions use their own resume path, never re-import to
+replenish limits. Unsupported formats require inspection, not guessed conversion.
+
 ## Freeze the contract
 
 Adapt the [version 2 template](../assets/session.json) to observed commands and
@@ -64,6 +86,7 @@ caller declaration; verify external inputs and record provenance yourself.
 "$engine" report --session "$session" --root "$pilot" --json
 ```
 
+Skip `init` when the session was already created by `import-legacy`.
 Choose `include` in the workspace call only when that capture policy is intended.
 A mutation needs a unique operation ID; reuse it only to retry that same request.
 `validate` does not execute commands or qualify the workload. `init` freezes the

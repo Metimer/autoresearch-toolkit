@@ -1,8 +1,8 @@
 # Plan d’implémentation — Autoresearch Toolkit
 
-Statut : lots 0–7 implémentés pour une exécution locale de confiance sur POSIX.
+Statut : lots 0–8 implémentés pour une exécution locale de confiance sur POSIX.
 Supervision, qualification, comparaisons confirmées et promotion atomique sont
-disponibles et intégrés aux skills. Prochaine tranche : migration/reprise (lot 8). Les limites
+disponibles et intégrés aux skills. Import historique et reprise contrôlée disponibles ; prochaine tranche : adaptateur Pi (lot 9). Les limites
 d’isolation, de quotas et de preuve sont détaillées dans `RUST_ENGINE.md`.
 Référence de départ : commit `130f305`, version du toolkit `0.1.0`.
 Responsable du projet et des nouvelles contributions : Metimer.
@@ -290,7 +290,8 @@ d’un ensemble de compromis multi-objectifs vient après le moteur à objectif 
 ## 9. API et commandes cibles
 
 Les commandes de session, d’évaluation et de consultation ci-dessous sont
-implémentées. Import, bundle complet de résultats et nettoyage restent des cibles.
+implémentées, ainsi que l’import historique explicite. Bundle complet de résultats
+et nettoyage restent des cibles.
 Les mutations exigent `--operation-id` ; `--root` choisit le projet pilote.
 
 | Commande | Effet et condition |
@@ -309,7 +310,8 @@ Les mutations exigent `--operation-id` ; `--root` choisit le projet pilote.
 | `autoresearch report --session <id>` | Lit le rapport de la référence qualifiée ou une évaluation explicitement choisie. |
 | `autoresearch export-candidate --session <id> --candidate <id> --output <dossier>` | Exporte le code reproductible sans attestation de performance. |
 | `autoresearch export-result --session <id> --output <dossier>` | Cible lot 10 : patch, preuves sélectionnées et reproduction. |
-| `autoresearch import-legacy --source <chemin>` | Importe une session ancienne dans une nouvelle session, sans activer la boucle. |
+| `autoresearch inspect-legacy --source <chemin>` | Inspecte les profils et anomalies sans créer de session. |
+| `autoresearch import-legacy --source <chemin> --config <contrat>` | Crée une nouvelle session avec historique non vérifié ; aucune boucle activée. |
 | `autoresearch gc --session <id> --dry-run` | Liste les espaces possédés pouvant être nettoyés ; suppression séparée explicite. |
 
 Chaque commande propose une sortie JSON stable et des codes de sortie documentés :
@@ -696,5 +698,33 @@ optimisée, et les archives tierces conservent leurs licences.
   confirmé, régression, historique, rapport, arrêt/reprise et export sont exercés.
   La source reste inchangée. Tests de lecture sans écriture et de preuve corrompue.
 
-La migration de journaux historiques relève du lot 8 ; la recherche multi-session,
+La migration de journaux historiques est décrite au lot 8 ci-dessous ; la recherche multi-session,
 les bundles de preuves et la distribution du binaire restent aux lots suivants.
+
+### Avancement du lot 8 — Import historique et reprise
+
+- Lecteur Rust indépendant, borné et strict pour Pi non versionné, portable v1 et
+  son profil non versionné. Détection structurelle, conservation des changements
+  de méthode Pi, rapport d’anomalies par ligne. Champs inconnus, statuts inconnus,
+  doublons imbriqués, valeurs invalides, formats mélangés et lignes tronquées bloquent
+  l’import complet. Aucun défaut favorable pour une donnée absente.
+- `inspect-legacy` ne crée rien. `import-legacy` exige un contrat v2 explicite et un
+  nouvel identifiant ; source et rapport sont synchronisés avant publication atomique
+  de la session, avec empreintes liées au premier événement. Requête identique
+  idempotente, refus de remplacer une session existante et validation des copies à
+  chaque ouverture. Les fichiers historiques d’origine restent inchangés.
+- Historique séparé des évaluations courantes dans `history` et `report --legacy`,
+  marqué `historical_unverified`. Aucun ancien script, verdict, budget ou changement
+  non committé n’est repris. Workspace et nouvelle qualification restent nécessaires.
+- Format portable v1 documenté pour les nouveaux journaux ; les anciens sont
+  conservés sans mélange de versions ni conversion implicite. Les variantes non
+  reconnues nécessitent une copie de conversion explicite, pas des alias devinés.
+- Tests après timeout et mort réelle du superviseur : groupe encore vivant bloquant
+  la reprise, absence de signal envoyé à un PID persistant, abandon explicite après
+  sortie du groupe, réservation conservée et échéance inchangée. Un lancement dont
+  l’identité n’a pas été persistée reste bloqué pour inspection.
+
+Limites : l’import est une conservation de données déclaratives, pas une preuve
+actuelle ni une restauration de checkout. Les autorisations et limites du nouveau
+contrat doivent être explicites. Le modèle reste local et de confiance ; aucune
+migration vers une exécution autonome Pi n’est activée par ce lot.

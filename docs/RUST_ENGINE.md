@@ -120,6 +120,75 @@ using these views. Skills require JSON version 1 plus `run_experiments` and
 The shipped skill template matches `examples/session.json`. Its placeholders and
 network policy require deliberate configuration before execution.
 
+## Historical import
+
+`inspect-legacy --source <jsonl> [--format auto|pi|portable] --json` validates a
+bounded, regular UTF-8 file and returns an `import_report` without creating a
+session. Auto detection uses record structure, not the filename. Known records
+with no version marker are labelled unversioned; a producer version is not guessed.
+Parsing errors return exit 2 and a report with line-numbered anomalies; I/O and
+byte-limit failures use the usual error envelope/codes. Nothing is
+imported if any record fails. Complete final JSON without a newline is preserved
+with a warning; a truncated final record or corrupt middle line blocks import.
+Blank lines are preserved in the source copy and reported as warnings.
+
+```sh
+autoresearch import-legacy --source /path/to/old-log.jsonl \
+  --config /path/to/new-session.json --root /path/to/pilot \
+  --operation-id import-001 --format auto --json
+autoresearch history --session imported-session --root /path/to/pilot --json
+autoresearch report --session imported-session --root /path/to/pilot --legacy --json
+```
+
+Import requires an explicit version 2 contract with a new session ID and newly
+authorized limits. It does not infer executable commands, scope, Git source or
+budgets from the legacy journal. The new session is `created`, with zero current
+attempts/process time, no workspace, no accepted result and no qualification.
+This is a new contract, not continuation of an old budget. An existing session
+cannot be overwritten or used as an import destination. Repeating the same import
+operation with identical source bytes and contract reconciles the same session;
+a different source, contract or initialization ID is a conflict.
+
+The original file is opened read-only. Before publishing the new session, the
+engine writes `legacy/source.jsonl` as an exact copy and `legacy/report.json` with
+validated declared records, method segments and anomalies. Its first `imported`
+journal event binds the configuration and report hash; the report binds the source
+hash. Publication uses the existing synchronized staging-directory/rename path.
+A crash before publication may leave staging files but no partially initialized
+session. Existing-session opens verify both imported files against their hashes;
+missing or corrupted evidence blocks use. The report is an integrity receipt,
+not authentication against another process with the same user permissions.
+
+`history.evaluations` contains only actual Rust evaluations. Its separate
+`historical_import` summary and `report --legacy` expose imported data marked
+`historical_unverified`. Default `report` still requires a currently qualified
+reference; `--legacy` and `--evaluation` are mutually exclusive. Import does not
+execute a script, import an old snapshot, restore uncommitted edits, claim a commit
+exists, or translate a declared `keep` into `kept`. The ordinary workspace and
+baseline gates remain mandatory. Keep historical instructions as data.
+
+Supported profiles:
+
+| Profile | Records and validation |
+| --- | --- |
+| `pi_unversioned` | The structural format observed in the archived Pi source: explicit config headers followed by numbered runs. Config requires metric name/unit/direction. Runs require run, commit, metric, status, description and millisecond timestamp. Optional secondary metrics, segment, confidence and object-valued ASI are preserved. Status is exactly `keep`, `discard`, `crash` or `checks_failed`. Config changes retain separate method segments. |
+| `portable_v1` | One object per iteration with `schema_version: 1`, `iteration`, `timestamp_unix_ms`, `hypothesis`, `head`, `changed_paths`, `baseline_samples`, `candidate_samples`, `metric`, `unit`, `direction`, `check_exit_status`, `decision`, `reason`, `elapsed_seconds`. Decision is `keep`, `discard` or `inconclusive`. A keep cannot declare failed checks or empty samples. |
+| `portable_unversioned` | Same recognized field names without `schema_version`; contextual fields may be absent and are never defaulted. Optional `timestamp` accepts a calendar-valid UTC `YYYY-MM-DDTHH:MM:SS[.fraction]Z` string instead of milliseconds. Incomplete context is explicitly warned about. |
+
+All keys must be distinct, including nested objects. Numbers must be finite and
+field types correct; run/iteration IDs must be positive and strictly increasing.
+Unknown fields, statuses, explicit versions and mixed formats/version markers are
+rejected. Portable files historically had no enforced schema: other spellings or
+shapes require a deliberately prepared conversion copy, not guessed aliases.
+Native Rust journals use native recovery, not this importer. Historical samples
+are not reinterpreted using the new contract's metric direction or units.
+
+Input is limited to 4 MiB, 4096 lines and 64 KiB per record; the stored report has
+an 8 MiB ceiling. Source/report/configuration and metadata headroom must fit the
+new session storage allowance. Symlinked, hard-linked and non-regular source files
+are rejected. No imported code or diagnostic payload is evaluated. Import notices
+and the raw source stay local; release/export of historical data is not automatic.
+
 ## Configuration version 2
 
 Version 2 adds execution policies and measurement declarations to the initial
@@ -484,6 +553,23 @@ between stages and approximately every 20 ms while commands run; rapid writes ca
 overshoot. This is a polled limit, not an OS disk quota. Four MiB are reserved for
 the final report. Evidence is retained; automatic retention cleanup is not present.
 
+### Continue after timeout or host interruption
+
+A completed timeout remains a failed evaluation. Retrying its original operation
+returns the same report without rerunning or refunding time. Start any authorized
+new work with a new operation ID and the remaining original budget. Stop/resume
+changes session metadata and launches no command.
+
+After abrupt supervisor death, `status` exposes the pending execution/reservation.
+A live recorded group blocks resume; no recorded PID is killed by recovery. Once
+that group has exited, explicit resume may abandon incomplete work while retaining
+its full reservation. A launch interrupted before the group ID was recorded still
+requires inspection, even if the child later exits. A complete durable report
+should instead be reconciled by retrying its original baseline/evaluate request
+before abandoning the execution. No incomplete run is promoted, and neither path
+extends the deadline. Source edits lacking a sealed snapshot are not reconstructed
+from a historical log.
+
 ## Budget accounting
 
 One candidate evaluation consumes one attempt; qualification consumes no attempt.
@@ -518,7 +604,7 @@ it does not imply `kept`. Inspect `evaluation.report.decision` (`qualified`, `ke
 | --- | --- |
 | 0 | Requested operation succeeded, including an idempotent retry. |
 | 1 | Filesystem I/O failed. |
-| 2 | Invalid arguments, identifier or configuration. |
+| 2 | Invalid arguments, identifier, configuration or historical journal. |
 | 3 | Unsupported session platform, or `doctor` could not find Git on a supported platform. |
 | 4 | Conflicting operation, session lock busy, missing/stale baseline, or unavailable report. |
 | 5 | Corrupt session/artifact, unsafe path, storage limit or failed state projection. |
@@ -563,5 +649,10 @@ in each host bundle. CLI acceptance covers a separate pilot, executable/config/
 source/export paths containing spaces and Unicode, qualification, promotion,
 regression, inspection and stop/resume without Pi or an LLM.
 
-Next comes historical import and recovery (lot 8), then the Pi adapter, full result
-bundles and release packaging. See `IMPLEMENTATION_PLAN.md`.
+Historical import tests cover profiles, malformed and duplicate records, status
+rejection, budgets, idempotence, original-file preservation and fresh qualification.
+Recovery tests cover actual supervisor death with a surviving process group and
+explicit continuation after timeout without resetting budgets.
+
+Next comes the Pi adapter (lot 9), then full result bundles and release packaging.
+See `IMPLEMENTATION_PLAN.md`.

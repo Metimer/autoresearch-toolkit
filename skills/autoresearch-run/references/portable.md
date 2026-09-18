@@ -36,11 +36,33 @@ For each remaining iteration, while time remains:
    iteration's own patch using precise edits. Do not use broad git checkout,
    reset --hard, clean, stash or filesystem deletion. If ownership is uncertain,
    stop and ask instead of guessing.
-6. Append one JSON line to .auto/portable-log.jsonl: iteration, UTC time, hypothesis,
-   HEAD, changed paths, baseline/candidate raw samples, metric/unit/direction,
-   check exit status, decision (keep/discard/inconclusive), reason and elapsed time.
+6. Append one JSON object per line to .auto/portable-log.jsonl using the version 1
+   record below. Preserve real samples, exit status, UTC time and measured duration;
+   never invent successful measurements for a failed command.
    Record retained uncommitted state in .auto/portable-state.md for resumption.
    Exclude credentials and sensitive raw workload data from logs.
+
+## Portable journal version 1
+
+Use these exact field names for a new journal (the values below are illustrative):
+
+```json
+{"schema_version":1,"iteration":1,"timestamp_unix_ms":1767225600000,"hypothesis":"Remove repeated allocation","head":"0000000000000000000000000000000000000000","changed_paths":["src/main.rs"],"baseline_samples":[10,10,10],"candidate_samples":[8,8,8],"metric":"bench_ms","unit":"ms","direction":"lower","check_exit_status":0,"decision":"keep","reason":"Measured improvement with passing checks","elapsed_seconds":1.5}
+```
+
+Replace every value with observed facts. Use a positive increasing iteration,
+a current UTC timestamp in milliseconds, full Git HEAD, finite raw samples,
+`lower`/`higher` direction, an integer check exit status and nonnegative elapsed
+seconds. All listed fields are required. A failed measurement can leave samples
+empty and use `discard` or `inconclusive` with an accurate reason; it cannot become
+`keep`. Record unavailable checks explicitly in the reason with a nonzero failure
+status; do not imply they ran successfully.
+
+Older portable journals had no enforced schema. Inspect their existing structure
+before appending, and preserve their original format during a resume. Do not mix
+versioned and unversioned records or rewrite historical lines. If migration to
+Rust is requested, use the engine's explicit historical import into a new session;
+imported portable verdicts remain unverified until new engine measurements.
 
 ## Stop and resume
 
