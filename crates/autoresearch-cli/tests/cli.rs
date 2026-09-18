@@ -11,8 +11,11 @@ static COUNTER: AtomicUsize = AtomicUsize::new(0);
 struct Fixture(PathBuf);
 impl Fixture {
     fn new() -> Self {
+        Self::named("autoresearch-cli")
+    }
+    fn named(label: &str) -> Self {
         let path = std::env::temp_dir().join(format!(
-            "autoresearch-cli-{}-{}",
+            "{label}-{}-{}",
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
@@ -713,4 +716,228 @@ fn stop_and_sigterm_cancel_a_separate_running_cli_process() {
         assert_eq!(body(&result)["session"]["state"]["status"], "stopped");
         assert!(!path.join("process.json").exists());
     }
+}
+
+#[test]
+fn reports_are_read_only_and_reject_unknown_or_corrupt_evidence() {
+    let fixture = Fixture::new();
+    let id = execution_fixture(&fixture, false);
+    let run = |args: &[&str]| {
+        fixture
+            .cli()
+            .args(args)
+            .args(["--session", &id, "--json"])
+            .output()
+            .unwrap()
+    };
+    let history = run(&["history"]);
+    assert!(history.status.success());
+    assert_eq!(body(&history)["evaluations"], json!([]));
+    let report = run(&["report"]);
+    assert_eq!(report.status.code(), Some(4));
+    assert_eq!(body(&report)["error"]["code"], "report_not_found");
+    assert_eq!(body(&run(&["status"]))["next_action"], "baseline");
+    assert!(run(&["baseline", "--operation-id", "baseline"])
+        .status
+        .success());
+    let path = fixture.0.join(".auto/engine/sessions").join(&id);
+    let before = fs::read(path.join("events.jsonl")).unwrap();
+    let projection = fs::read(path.join("state.json")).unwrap();
+    let history = body(&run(&["history"]));
+    assert_eq!(history["evaluations"].as_array().unwrap().len(), 1);
+    assert_eq!(history["commands_executed"], false);
+    let key = history["evaluations"][0]["evaluation_key"]
+        .as_str()
+        .unwrap();
+    let text_report = fixture
+        .cli()
+        .args(["report", "--session", &id])
+        .output()
+        .unwrap();
+    assert!(text_report.status.success());
+    let text_report = String::from_utf8(text_report.stdout).unwrap();
+    assert!(text_report.contains("Accepted median: 10 ms"));
+    assert!(text_report.contains("observations: 15"));
+    let default_report = body(&run(&["report"]));
+    let selected_report = body(&run(&["report", "--evaluation", key]));
+    assert_eq!(default_report, selected_report);
+    assert_eq!(
+        selected_report["evaluation"]["sha256"],
+        history["evaluations"][0]["sha256"]
+    );
+    assert_eq!(selected_report["commands_executed"], false);
+    for args in [
+        vec!["report", "--evaluation", "../../outside"],
+        vec!["report", "--evaluation", "run-unknown"],
+        vec!["report", "--evaluation", "workspace"],
+    ] {
+        let result = run(&args);
+        assert_eq!(result.status.code(), Some(4));
+    }
+    for args in [
+        vec!["report", "--operation-id", "write"],
+        vec!["history", "--evaluation", key],
+        vec!["report", "--evaluation", key, "--evaluation", key],
+    ] {
+        assert_eq!(run(&args).status.code(), Some(2));
+    }
+    assert_eq!(fs::read(path.join("events.jsonl")).unwrap(), before);
+    assert_eq!(fs::read(path.join("state.json")).unwrap(), projection);
+    let evidence = path.join("executions").join(key).join("report.json");
+    let mut bytes = fs::read(&evidence).unwrap();
+    bytes.push(b' ');
+    fs::write(&evidence, bytes).unwrap();
+    for args in [
+        vec!["history"],
+        vec!["report"],
+        vec!["report", "--evaluation", key],
+    ] {
+        let result = run(&args);
+        assert_eq!(result.status.code(), Some(5));
+        assert_eq!(body(&result)["error"]["code"], "corrupt_artifact");
+    }
+    assert_eq!(fs::read(path.join("events.jsonl")).unwrap(), before);
+}
+
+#[test]
+fn standalone_acceptance_uses_unicode_paths_and_preserves_source_and_evidence() {
+    let fixture = Fixture::named("projet été 測定 avec espaces");
+    let id = source_fixture(&fixture);
+    // The distributed skill template is the starting contract for this acceptance run.
+    let mut config: Value = serde_json::from_str(include_str!(
+        "../../../skills/autoresearch-scout/assets/session.json"
+    ))
+    .unwrap();
+    let original: Value =
+        serde_json::from_slice(&fs::read(fixture.0.join("workspace.json")).unwrap()).unwrap();
+    config["source"] = original["source"].clone();
+    config["budget"]["deadline_unix_ms"] = original["budget"]["deadline_unix_ms"].clone();
+    let source = fixture.0.join("source été 測定");
+    fs::rename(fixture.0.join("source"), &source).unwrap();
+    config["source"]["repository"] = json!(source);
+    config["execution"]["network"] = json!("allowed");
+    config["sampling"]["warmup"] = json!(0);
+    config["budget"]["max_experiments"] = json!(3);
+    config["checks"] =
+        json!([{"executable":"/bin/sh", "args":["-c", "test -s src/main.txt"], "cwd":"."}]);
+    let code = "v=10; case \"$(cat src/main.txt)\" in fast) v=5;; slow) v=20;; esac; printf 'METRIC {\"name\":\"bench_ms\",\"value\":%s,\"unit\":\"ms\"}\\n' \"$v\"";
+    config["benchmark"] = json!({"executable":"/bin/sh", "args":["-c",code], "cwd":"."});
+    let contract = fixture.0.join("contrat été 測定.json");
+    fs::write(&contract, serde_json::to_vec(&config).unwrap()).unwrap();
+    let pilot = fixture.0.join("pilote séparé 測定");
+    fs::create_dir(&pilot).unwrap();
+    let binary = fixture.0.join("moteur Rust été");
+    fs::copy(env!("CARGO_BIN_EXE_autoresearch"), &binary).unwrap();
+    let raw = |args: &[&str]| {
+        Command::new(&binary)
+            .current_dir(&fixture.0)
+            .args(args)
+            .arg("--json")
+            .output()
+            .unwrap()
+    };
+    let checked = |args: &[&str]| {
+        let output = raw(args);
+        assert!(output.status.success(), "{output:?}");
+        assert!(output.stderr.is_empty(), "{output:?}");
+        let value = body(&output);
+        assert_eq!(value["schema_version"], 1);
+        value
+    };
+    assert_eq!(
+        checked(&["doctor"])["capabilities"]["inspect_evaluations"],
+        true
+    );
+    checked(&["validate", "--config", contract.to_str().unwrap()]);
+    checked(&[
+        "init",
+        "--config",
+        contract.to_str().unwrap(),
+        "--root",
+        pilot.to_str().unwrap(),
+        "--operation-id",
+        "init",
+    ]);
+    let run = |args: &[&str]| {
+        let mut all = args.to_vec();
+        all.extend(["--session", &id, "--root", pilot.to_str().unwrap()]);
+        checked(&all)
+    };
+    assert_eq!(run(&["status"])["next_action"], "workspace");
+    run(&[
+        "workspace",
+        "--local-changes",
+        "exclude",
+        "--operation-id",
+        "workspace",
+    ]);
+    run(&["baseline", "--operation-id", "baseline"]);
+    assert_eq!(
+        run(&["status"])["next_action"],
+        "prepare_or_evaluate_if_authorized"
+    );
+    for (candidate, decision) in [("fast", "kept"), ("slow", "discarded")] {
+        let prepared = run(&[
+            "prepare-candidate",
+            "--candidate",
+            candidate,
+            "--hypothesis",
+            "Mesurer un changement ciblé",
+            "--operation-id",
+            &format!("prepare-{candidate}"),
+        ]);
+        fs::write(
+            PathBuf::from(prepared["artifact"]["path"].as_str().unwrap()).join("src/main.txt"),
+            candidate,
+        )
+        .unwrap();
+        run(&[
+            "seal",
+            "--candidate",
+            candidate,
+            "--operation-id",
+            &format!("seal-{candidate}"),
+        ]);
+        let result = run(&[
+            "evaluate",
+            "--candidate",
+            candidate,
+            "--operation-id",
+            &format!("evaluate-{candidate}"),
+        ]);
+        assert_eq!(result["evaluation"]["report"]["decision"], decision);
+    }
+    let history = run(&["history"]);
+    assert_eq!(history["evaluations"].as_array().unwrap().len(), 3);
+    assert_eq!(history["accepted"], "sealed-fast");
+    assert_eq!(
+        run(&["report"])["evaluation"]["report"]["candidate"],
+        "sealed-fast"
+    );
+    let rejected = history["evaluations"][2]["evaluation_key"]
+        .as_str()
+        .unwrap();
+    assert_eq!(
+        run(&["report", "--evaluation", rejected])["evaluation"]["report"]["decision"],
+        "discarded"
+    );
+    run(&["stop", "--operation-id", "stop"]);
+    assert_eq!(run(&["status"])["next_action"], "resume_if_authorized");
+    run(&["resume", "--operation-id", "resume"]);
+    let destination = fixture.0.join("résultat accepté 測定");
+    run(&[
+        "export-candidate",
+        "--candidate",
+        "fast",
+        "--output",
+        destination.to_str().unwrap(),
+        "--operation-id",
+        "export",
+    ]);
+    assert!(destination.join("candidate.patch").is_file());
+    assert_eq!(
+        fs::read(source.join("src/main.txt")).unwrap(),
+        b"baseline\n"
+    );
+    assert_eq!(run(&["status"])["session"]["state"]["attempts_used"], 2);
 }

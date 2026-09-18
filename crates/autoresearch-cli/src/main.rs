@@ -1,3 +1,5 @@
+mod inspection;
+
 use autoresearch_core::{
     session::{SessionError, SessionStore},
     workspace::LocalChanges,
@@ -21,6 +23,8 @@ Usage:
   autoresearch schema
   autoresearch init --config <file> --operation-id <id> [--root <dir>] [--json]
   autoresearch status --session <id> [--root <dir>] [--json]
+  autoresearch history --session <id> [--root <dir>] [--json]
+  autoresearch report --session <id> [--evaluation <run-key>] [--root <dir>] [--json]
   autoresearch resume --session <id> --operation-id <id> [--root <dir>] [--repair-tail] [--json]
   autoresearch stop --session <id> --operation-id <id> [--root <dir>] [--json]
   autoresearch workspace --session <id> --local-changes <exclude|include> --operation-id <id> [--root <dir>] [--json]
@@ -39,6 +43,8 @@ Session commands persist metadata below the explicit root (default: current dire
 Use the same operation ID to retry a mutation; use a new ID for a new operation.
 baseline qualifies the captured reference; evaluate checks and measures a sealed candidate.
 stop requests cancellation when a supervisor owns the session lock.
+history lists completed evaluations; report defaults to the qualified accepted reference.
+Read evaluation.report.decision: exit zero also covers rejected or cancelled evaluations.
 Workspace commands use isolated Git plumbing and never run project commands.
 Execution requires trusted commands and network=allowed; there is no network sandbox.
 The Pi adapter is not implemented yet.
@@ -86,6 +92,8 @@ fn main() -> ExitCode {
             if [
                 "init",
                 "status",
+                "history",
+                "report",
                 "resume",
                 "stop",
                 "workspace",
@@ -143,7 +151,7 @@ fn doctor(as_json: bool) -> ExitCode {
         "platform": {"os": env::consts::OS, "arch": env::consts::ARCH, "supported": supported},
         "git_on_path": git_found,
         "git_version_verified": false,
-        "capabilities": {"validate_config": true, "manage_sessions": supported, "isolated_workspaces": supported && git_found, "run_experiments": supported && git_found, "pi_adapter": false}
+        "capabilities": {"validate_config": true, "manage_sessions": supported, "isolated_workspaces": supported && git_found, "run_experiments": supported && git_found, "pi_adapter": false, "inspect_evaluations": supported}
     }), &format!(
         "Autoresearch {}\nPlatform: {} / {} (supported: {})\nGit executable on PATH: {} (version not verified)\nAvailable: configuration validation, persistent sessions and isolated snapshots. Trusted command supervision and paired evaluations are available.",
         env!("CARGO_PKG_VERSION"), env::consts::OS, env::consts::ARCH, supported, git_found
@@ -230,6 +238,11 @@ struct SessionArgs {
     hypothesis: Option<String>,
     local_changes: Option<LocalChanges>,
     output: Option<PathBuf>,
+    evaluation: Option<String>,
+}
+
+fn is_read_only(command: &str) -> bool {
+    ["status", "history", "report"].contains(&command)
 }
 
 fn session_args(command: &str, args: &[OsString]) -> Result<SessionArgs, &'static str> {
@@ -249,7 +262,7 @@ fn session_args(command: &str, args: &[OsString]) -> Result<SessionArgs, &'stati
             Some("--session") if command != "init" && parsed.session.is_none() => {
                 parsed.session = Some(value.to_str().ok_or("session ID must be UTF-8")?.into());
             }
-            Some("--operation-id") if command != "status" && parsed.operation.is_none() => {
+            Some("--operation-id") if !is_read_only(command) && parsed.operation.is_none() => {
                 let id = value.to_str().ok_or("operation ID must be UTF-8")?;
                 if id.is_empty()
                     || id.len() > 128
@@ -280,6 +293,10 @@ fn session_args(command: &str, args: &[OsString]) -> Result<SessionArgs, &'stati
                     _ => return Err("local changes policy must be exclude or include"),
                 })
             }
+            Some("--evaluation") if command == "report" && parsed.evaluation.is_none() => {
+                parsed.evaluation =
+                    Some(value.to_str().ok_or("evaluation key must be UTF-8")?.into())
+            }
             Some("--output") if command == "export-candidate" && parsed.output.is_none() => {
                 parsed.output = Some(value.into())
             }
@@ -288,7 +305,7 @@ fn session_args(command: &str, args: &[OsString]) -> Result<SessionArgs, &'stati
     }
     if (command == "init" && parsed.config.is_none())
         || (command != "init" && parsed.session.is_none())
-        || (command != "status" && parsed.operation.is_none())
+        || (!is_read_only(command) && parsed.operation.is_none())
         || (command == "workspace" && parsed.local_changes.is_none())
         || (["prepare-candidate", "seal", "export-candidate", "evaluate"].contains(&command)
             && parsed.candidate.is_none())
@@ -363,6 +380,15 @@ fn session_command(command: &str, args: &[OsString], as_json: bool) -> ExitCode 
         }
         Err(issue) => return session_error(as_json, issue),
     };
+    if ["history", "report"].contains(&command) {
+        return match inspection::inspect(&guard, command, args.evaluation.as_deref()) {
+            Ok((value, text)) => {
+                emit(as_json, value, &text);
+                ExitCode::SUCCESS
+            }
+            Err(issue) => session_error(as_json, issue),
+        };
+    }
     if ["baseline", "evaluate"].contains(&command) {
         let result = if command == "baseline" {
             guard.baseline(args.operation.as_deref().unwrap())
@@ -437,16 +463,17 @@ fn session_command(command: &str, args: &[OsString], as_json: bool) -> ExitCode 
         Err(issue) => return session_error(as_json, issue),
     };
     let view = guard.view(now);
-    let mut result = json!({"schema_version": 1, "command": command, "ok": true, "session": view, "commands_executed": false});
+    let next_action = inspection::next_action(&view);
+    let mut result = json!({"schema_version": 1, "command": command, "ok": true, "session": view, "next_action": next_action, "commands_executed": false});
     if command == "resume" || command == "stop" {
         result["already_applied"] = json!(already_applied);
     }
     if let Some(operation) = args.operation {
         result["operation_id"] = json!(operation);
     }
-    emit(as_json, result, &format!("Session {}: {:?} (event {})\nBudget remaining: {} attempts, {} ms; deadline expired: {}\nRecovery required: {}; state projection current: {}",
+    emit(as_json, result, &format!("Session {}: {:?} (event {})\nBudget remaining: {} attempts, {} ms; deadline expired: {}\nRecovery required: {}; state projection current: {}\nNext action: {}",
         view.state.session_id, view.state.status, view.state.sequence, view.attempts_remaining,
-        view.active_ms_remaining, view.deadline_expired, view.recovery_required, view.projection_current));
+        view.active_ms_remaining, view.deadline_expired, view.recovery_required, view.projection_current, next_action));
     ExitCode::SUCCESS
 }
 
@@ -454,9 +481,8 @@ fn session_error(as_json: bool, issue: SessionError) -> ExitCode {
     let exit = match issue.code {
         "invalid_config" | "invalid_identifier" | "invalid_protocol" | "invalid_environment" => 2,
         "unsupported" => 3,
-        "conflict" | "session_busy" | "source_changed" | "baseline_required" | "baseline_stale" => {
-            4
-        }
+        "conflict" | "session_busy" | "source_changed" | "baseline_required" | "baseline_stale"
+        | "report_not_found" => 4,
         "corrupt_session" | "corrupt_artifact" | "projection_failed" | "unsafe_path"
         | "storage_limit" | "recovery_required" => 5,
         "budget_exhausted" => 6,
