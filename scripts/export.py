@@ -16,6 +16,7 @@ MANIFESTS = {
 }
 # Explicit distribution inventory. New resources must be reviewed and added here;
 # an unrelated file placed in a skill must never silently enter a release.
+# Both skill modes are shipped; the separately installed Rust binary is excluded.
 PORTABLE_FILES = (
     "README.md",
     "LICENSE",
@@ -23,8 +24,13 @@ PORTABLE_FILES = (
     "skills/autoresearch-scout/SKILL.md",
     "skills/autoresearch-scout/agents/openai.yaml",
     "skills/autoresearch-scout/assets/prompt.md",
+    "skills/autoresearch-scout/assets/session.json",
+    "skills/autoresearch-scout/references/engine.md",
+    "skills/autoresearch-scout/references/portable.md",
     "skills/autoresearch-scout/scripts/measure.py",
     "skills/autoresearch-run/SKILL.md",
+    "skills/autoresearch-run/references/engine.md",
+    "skills/autoresearch-run/references/portable.md",
     "skills/autoresearch-run/agents/openai.yaml",
 )
 

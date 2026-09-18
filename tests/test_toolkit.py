@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import math
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -288,6 +289,22 @@ class ExportTests(unittest.TestCase):
                         cwd=directory, capture_output=True, text=True, timeout=10,
                     )
                     self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_exported_skill_links_and_engine_template_are_self_contained(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = exporter.export("generic", Path(directory) / "autoresearch-toolkit")
+            for page in (target / "skills").rglob("*.md"):
+                for link in re.findall(r"\[[^\]]+\]\(([^)]+)\)", page.read_text()):
+                    if "://" in link or link.startswith("#"):
+                        continue
+                    resource = (page.parent / link.split("#", 1)[0]).resolve()
+                    self.assertTrue(resource.is_relative_to(target.resolve()), (page, link))
+                    self.assertTrue(resource.is_file(), (page, link))
+            template = json.loads((target / "skills/autoresearch-scout/assets/session.json").read_text())
+            # The shipped template must track the documented contract, without injecting execution.
+            self.assertEqual(template, json.loads((ROOT / "examples/session.json").read_text()))
+            self.assertFalse((target / "target").exists())
+            self.assertFalse((target / "autoresearch").exists())
 
     def test_existing_output_is_not_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:
