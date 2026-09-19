@@ -1,8 +1,8 @@
 # Plan d’implémentation — Autoresearch Toolkit
 
-Statut : lots 0–8 implémentés pour une exécution locale de confiance sur POSIX.
+Statut : lots 0–10 implémentés pour une exécution locale de confiance sur POSIX.
 Supervision, qualification, comparaisons confirmées et promotion atomique sont
-disponibles et intégrés aux skills. Import historique, reprise contrôlée et adaptateur Pi disponibles ; prochaine tranche : mémoire et bundles de résultats (lot 10). Les limites
+disponibles et intégrés aux skills. Import historique, reprise contrôlée, adaptateur Pi, mémoire et bundles de résultats disponibles ; prochaine tranche : distribution et qualification (lot 11). Les limites
 d’isolation, de quotas et de preuve sont détaillées dans `RUST_ENGINE.md`.
 Référence de départ : commit `130f305`, version du toolkit `0.1.0`.
 Responsable du projet et des nouvelles contributions : Metimer.
@@ -757,3 +757,35 @@ la CI distante reste à exécuter. Pas de sandbox, de garantie après SIGKILL de
 de publication du paquet ou de réparation automatique. L’initialisation, l’import
 historique et la réparation du journal restent des actions CLI explicites. Les
 scripts transitifs des hooks ne sont pas déduits en analysant du code arbitraire.
+
+### Avancement du lot 10 — Mémoire et résultats partageables
+
+- Recherche locale `memory` par chemin, hypothèse, candidat/session et motif
+  d’échec ; index privé atomique reconstruisible avec `index`. Les lectures
+  revérifient les journaux, rapports et snapshots sous verrous ; index supprimé
+  ou corrompu sans influence sur les verdicts. Session occupée/corrompue bloquante
+  pour la vue complète. Limites explicites de sessions, lignes et taille.
+- Empreinte de protocole enregistrée à l’exécution sans identité administrative
+  de session. Doublon exact lié à référence complète, patch binaire et protocole.
+  Les anciens rapports sans cette empreinte restent lisibles mais ne reçoivent
+  aucun doublon supposé. Une correspondance ne rejette jamais un essai.
+- `result-preview` et `export-result` partagent un inventaire déterministe.
+  Rapports Markdown/JSON avec verdict inchangé, observations par phase et limites.
+  Code, protocole privé et logs individuels sont des sélections explicites ; les
+  champs de contexte personnel et les logs sont exclus du rapport par défaut.
+- Export de la base initiale, du patch cumulatif et de la référence comparée lorsque
+  le code est sélectionné. Application du patch vérifiée dans un index Git isolé.
+  Guide et template de reproduction, prévisualisation des empreintes/tailles,
+  publication exclusive, reçu lié au journal et réconciliation après interruption.
+- Tests : canaris privés absents par défaut, logs altérés refusés, fichiers liés
+  rejetés, destination existante préservée, reprise sans écrasement, bases/protocoles
+  distincts sans faux doublon. Candidat reconstruit dans une copie vierge puis
+  nouvellement qualifié/mesuré avec les mêmes observations déterministes.
+  Parcours CLI Unicode et guidance du skill moteur étendus.
+
+Limites : index local borné, aucune recherche distante ni décision automatique ;
+les vues de recherche sont recalculées plutôt que confiées au cache. Les labels
+de métriques et mesures sont publiés ; aucun détecteur universel de secrets n’est
+annoncé. Sélectionner le code ou le protocole peut inclure des données privées.
+Les dépendances externes et transitives restent à fournir. La CI distante et les
+tests des paquets distribués restent au lot 11 ; aucun push/publication effectué.

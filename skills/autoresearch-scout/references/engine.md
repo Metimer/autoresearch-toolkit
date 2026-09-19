@@ -93,6 +93,10 @@ A mutation needs a unique operation ID; reuse it only to retry that same request
 contract; never edit the stored config, journal, projections or reports.
 
 Only `evaluation.report.decision == "qualified"` establishes the baseline.
+If `doctor.capabilities.session_memory` is true, search related native trials
+using `"$engine" memory --root "$pilot" --query "relevant/path" --json` before
+proposing new hypotheses. Historical measurements remain context; an exact
+duplicate marker never replaces fresh qualification or authorizes execution.
 Exit zero also covers completed failed/inconclusive/cancelled operations. An
 unstable baseline blocks optimization: inspect its reason and samples, do not
 apply the portable percentage-noise rule. Use `history` and `report --evaluation`

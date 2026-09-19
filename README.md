@@ -245,6 +245,19 @@ Inspect completed results without launching commands:
 key from `history` to inspect any completed result, including rejected trials.
 `status` includes an advisory `next_action`; it does not authorize an experiment.
 
+Search native evaluations across sessions and preview a shareable report:
+
+```sh
+autoresearch memory --root /path/to/project --query 'src/' --json
+autoresearch result-preview --root /path/to/project --session example-session \
+  --evaluation run-REPLACE_WITH_KEY --json
+```
+
+`export-result` publishes the selected report to a new directory. Code, command/
+environment declarations and individual raw logs require explicit selection;
+the default report excludes them. See [memory and result bundles](docs/RESULTS.md)
+for export, reproduction, privacy and exact duplicate detection.
+
 See [Rust engine development](docs/RUST_ENGINE.md) for the configuration contract,
 commands, recovery procedure and storage guarantees. The existing skill bundles
 do not include the Rust sources or binary.

@@ -99,3 +99,33 @@ The bundle verifies code reproduction, not performance; report the evaluation
 key/hash separately. No source commit or branch merge is implicit. Preserve the
 session and provide its mode, executable, pilot/session IDs and remaining budget
 for an explicit future resume.
+
+## Memory and shareable reports
+
+When `doctor.capabilities.session_memory` is true, use
+`"$engine" memory --root "$pilot" --query "src/changed-path" --json` to inspect
+related native trials. Match hypotheses and failure reasons as well as paths.
+Exact duplicate keys bind reference, patch and recorded protocol; they inform
+the next hypothesis and never authorize or reject an experiment automatically.
+A busy/corrupt session blocks the complete query. Historical imports remain separate.
+
+When `doctor.capabilities.result_bundles` is true, an explicit evaluation from
+`history` can be previewed and exported with its recorded verdict:
+
+```sh
+"$engine" result-preview --root "$pilot" --session "$session" \
+  --evaluation "$evaluation_key" --json
+"$engine" export-result --root "$pilot" --session "$session" \
+  --evaluation "$evaluation_key" --output "$pilot/result-001" \
+  --operation-id result-001 --json
+```
+
+Defaults export reports and reproduction guidance, without code, commands,
+environment values or raw logs. Choose `--include-code`, `--include-protocol` and
+individual `--log stages/<file>` options only for content authorized for export;
+use the same options for preview and export. Code snapshots, protocol arguments
+and logs can contain private data. Metric labels and measurements remain report
+content. A bundle is local until the user authorizes sharing it elsewhere.
+Its cumulative patch reconstructs the candidate; its `reference/` is the actual
+comparison baseline. Repeating measurements requires a new qualified session and
+explicit budget. An exported failure or rejection remains a failure or rejection.

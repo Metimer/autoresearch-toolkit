@@ -659,7 +659,12 @@ the version 1 CLI envelope. `doctor.capabilities.pi_adapter` advertises protocol
 support, not an installed Pi package; `hook_protocol_version` is 1. Integration
 tests load the real extension and dispatch Pi lifecycle events without a provider.
 They verify ordinary descendant cleanup and budget preservation on cancellation.
-Next come multi-session memory, full result bundles and release packaging.
+Multi-session search and selective result bundles are now available through
+`memory`, `index`, `result-preview` and `export-result`. See
+[memory and result bundles](RESULTS.md) for the CLI, protocol fingerprints,
+privacy defaults, reconstruction and crash recovery. These operations do not
+launch experiments; `doctor` advertises `session_memory` and `result_bundles`.
+Release packaging and qualification remain the next plan item.
 See `IMPLEMENTATION_PLAN.md`.
 
 ## Hook contract version 1
