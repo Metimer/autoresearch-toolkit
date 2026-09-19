@@ -161,8 +161,9 @@ across restarts. It can also create independent Git snapshots, prepare and seal
 scoped candidates, supervise commands, qualify a reference and compare candidates
 with a separate confirmation series. Verified improvements become the next
 reference; patches can be exported without committing to the source repository.
-The Pi engine adapter is still planned. Both skills support the Rust and portable
-workflows; the Pi manifest currently loads those skills only.
+An optional [Pi adapter](adapters/pi/README.md) connects Pi 0.85.1 to an explicit
+Rust session, including cancellation and recorded verdicts. Both skills support
+the Rust and portable workflows; the root Pi manifest loads those skills only.
 
 From a full source checkout, with Rust 1.81 or later:
 
@@ -263,6 +264,15 @@ Characterization tests for the archived JSONL reader additionally require Node.j
 
 ```sh
 node --test tests/legacy/jsonl.test.mjs
+```
+
+The optional Pi adapter has its own pinned dependencies and integration tests:
+
+```sh
+cargo build --locked
+npm --prefix adapters/pi ci --ignore-scripts --no-audit --no-fund
+npm --prefix adapters/pi run check
+npm --prefix adapters/pi test
 ```
 
 The suite covers measurements, failures, timeouts, and exports for all five

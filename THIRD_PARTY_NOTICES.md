@@ -25,3 +25,14 @@ transitive and test dependencies; this paragraph is not a full release license
 inventory. Dependency license texts and copyright notices must accompany binary
 release bundles. No binary release is published by this workspace; release
 packaging remains a separate plan item.
+
+## Optional Pi adapter dependencies
+
+`adapters/pi/` is new Toolkit code under the root MIT license. Its runtime schema
+dependency TypeBox 1.3.7 is MIT (copyright Haydn Paterson); its host peer dependency
+is `@earendil-works/pi-coding-agent` 0.85.1, declared MIT by its package metadata.
+TypeScript and Node.js type declarations are development dependencies. The adapter
+lockfile records direct and transitive packages; dependencies are installed
+separately and are not vendored or included in portable skill exports. Any future
+adapter release bundling dependencies must include their applicable notices and
+license texts. The original archived extension is not loaded by this adapter.

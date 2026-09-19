@@ -631,7 +631,7 @@ reproduction, including binary content and executable modes. One
 ignored test is a subprocess fixture invoked by its parent test; it is exercised
 as part of the normal suite.
 
-Node.js 24 is needed only for characterization of the archived reader. The Rust
+Node.js 24 is needed for the optional Pi adapter and archived-reader tests. The Rust
 binary needs neither Node.js nor Pi. CI defines Linux/macOS jobs for Rust 1.81 and
 stable, Python 3.10/3.13, plus a Node 24 job; remote execution remains unverified. This tranche was checked locally on macOS
 with Rust 1.81 and Git 2.47.0.
@@ -654,5 +654,54 @@ rejection, budgets, idempotence, original-file preservation and fresh qualificat
 Recovery tests cover actual supervisor death with a surviving process group and
 explicit continuation after timeout without resetting budgets.
 
-Next comes the Pi adapter (lot 9), then full result bundles and release packaging.
+The optional [Pi adapter](../adapters/pi/README.md) loads on Pi 0.85.1 and uses
+the version 1 CLI envelope. `doctor.capabilities.pi_adapter` advertises protocol
+support, not an installed Pi package; `hook_protocol_version` is 1. Integration
+tests load the real extension and dispatch Pi lifecycle events without a provider.
+They verify ordinary descendant cleanup and budget preservation on cancellation.
+Next come multi-session memory, full result bundles and release packaging.
 See `IMPLEMENTATION_PLAN.md`.
+
+## Hook contract version 1
+
+`execution.hooks.before` and `.after` remain arrays of explicit command
+specifications in configuration version 2. Hook commands use the same supervisor,
+environment policy, process groups, timeout, output/storage limits and active-time
+budget as checks and benchmarks. They do not receive special execution privileges.
+
+In addition to ordinary stage variables, hooks receive these reserved variables:
+
+| Variable | Meaning |
+| --- | --- |
+| `AUTORESEARCH_HOOK_VERSION` | `1` |
+| `AUTORESEARCH_HOOK_PHASE` | `before` or `after` |
+| `AUTORESEARCH_HOOK_SIDE` | `reference` or `candidate` |
+| `AUTORESEARCH_SESSION_ID` | Frozen engine session ID |
+| `AUTORESEARCH_OPERATION_ID` | Baseline or evaluation operation ID |
+| `AUTORESEARCH_DECISION` | `pending` before measurement; the current verdict for an after hook |
+
+Before hooks run once per side after setup and before checks and sampling. Failure
+blocks the trial. After hooks run at the end; failures set `after_hook_failed` and
+retain the evaluation verdict. Cancellation can still set the final verdict to
+`cancelled`; uncertain process cleanup or unsettled accounting prevents publishing
+a completed result. After hooks are not guaranteed to execute after cancellation
+or budget exhaustion and must not be used as the only cleanup mechanism.
+
+Hook stdout/stderr are stored with stage evidence. Even a `METRIC` line from a
+hook is not a benchmark sample, and no hook response can set `kept` or rewrite the
+method. Only declared generated paths may change during execution.
+
+Put hook scripts and their method dependencies in `scope.protected_paths`, for
+example `"hooks/"`. Workspace capture and snapshot verification reject direct
+workspace file operands (including interpreter script arguments) that are not
+protected, and reject direct operands inside generated paths. Relative operands
+are resolved against the hook's `cwd`. Protected script edits are rejected when
+sealing a candidate. These checks are not a shell parser or a sandbox: declare
+indirectly sourced files and imported dependencies explicitly; inline code,
+external programs and transitive dependencies remain trusted inputs.
+
+Hook protocol 1 is included in the method fingerprint. Earlier qualifications
+with hooks require a new baseline under this engine before comparison; existing
+reports remain readable. Sessions without hooks keep their method fingerprint.
+A frozen session whose direct hook scripts were not protected must be replaced
+with a correctly scoped contract; the engine does not rewrite that session.

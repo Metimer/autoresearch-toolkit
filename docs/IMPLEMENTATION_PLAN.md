@@ -2,7 +2,7 @@
 
 Statut : lots 0–8 implémentés pour une exécution locale de confiance sur POSIX.
 Supervision, qualification, comparaisons confirmées et promotion atomique sont
-disponibles et intégrés aux skills. Import historique et reprise contrôlée disponibles ; prochaine tranche : adaptateur Pi (lot 9). Les limites
+disponibles et intégrés aux skills. Import historique, reprise contrôlée et adaptateur Pi disponibles ; prochaine tranche : mémoire et bundles de résultats (lot 10). Les limites
 d’isolation, de quotas et de preuve sont détaillées dans `RUST_ENGINE.md`.
 Référence de départ : commit `130f305`, version du toolkit `0.1.0`.
 Responsable du projet et des nouvelles contributions : Metimer.
@@ -728,3 +728,32 @@ Limites : l’import est une conservation de données déclaratives, pas une pre
 actuelle ni une restauration de checkout. Les autorisations et limites du nouveau
 contrat doivent être explicites. Le modèle reste local et de confiance ; aucune
 migration vers une exécution autonome Pi n’est activée par ce lot.
+
+### Avancement du lot 9 — Adaptateur Pi et hooks
+
+- Paquet optionnel `adapters/pi/`, Pi 0.85.1 épinglé, Node.js 24 et lockfile dédié.
+  Le manifeste racine et les exports portables conservent uniquement les skills.
+  Connexion explicite à un binaire, un pilote et une session déjà initialisée ;
+  négociation JSON v1 et capacités avant la première opération.
+- Outil préfixé `autoresearch_engine` pour workspace, préparation, scellement,
+  qualification, évaluation, consultation, arrêt/reprise et export. Identifiants
+  d’opération explicites ; décision et empreinte issues du rapport Rust. Une seule
+  opération à la fois, sans calcul de verdict ni boucle automatique côté Pi.
+- Annulation Pi, commande `/autoresearch-stop`, changement de session, fork,
+  navigation et shutdown reliés au processus Rust possédé. Attente du nettoyage,
+  erreur après cinq secondes si encore en cours, aucune réutilisation de PID stocké
+  et aucune reprise automatique. Les budgets et échéances restent ceux du moteur.
+- Contrat hooks v1 dans l’environnement réservé et l’empreinte de méthode.
+  Fichiers directement référencés protégés dès la capture, refus des chemins
+  générés ; dépendances indirectes à déclarer dans le périmètre protégé. Runner et
+  limites communs, before bloquant et after conservant le verdict avec anomalie.
+- Tests avec chargeur et runner d’événements Pi réels, CLI Rust, dépôts temporaires,
+  parcours jusqu’à promotion/export et arrêt de hooks avec descendants. Aucun
+  fournisseur LLM ni clé API nécessaire. Tests de protocole invalide/surdimensionné
+  et absence de relance aux événements de session. Matrice Pi Linux/macOS ajoutée.
+
+Limites : validation locale sur macOS, Node.js 24.20.0, Rust 1.81 et Pi 0.85.1 ;
+la CI distante reste à exécuter. Pas de sandbox, de garantie après SIGKILL de Pi,
+de publication du paquet ou de réparation automatique. L’initialisation, l’import
+historique et la réparation du journal restent des actions CLI explicites. Les
+scripts transitifs des hooks ne sont pas déduits en analysant du code arbitraire.
