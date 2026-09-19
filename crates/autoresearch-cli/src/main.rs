@@ -1,5 +1,6 @@
 mod inspection;
 mod legacy;
+mod results;
 
 use autoresearch_core::{
     session::{SessionError, SessionStore},
@@ -22,6 +23,10 @@ Usage:
   autoresearch doctor [--json]
   autoresearch validate --config <file> [--json]
   autoresearch schema
+  autoresearch memory [--query <text>] [--root <dir>] [--json]
+  autoresearch index --operation-id <id> [--root <dir>] [--json]
+  autoresearch result-preview --session <id> --evaluation <run-key> [--include-code] [--include-protocol] [--log <stages/file>] [--root <dir>] [--json]
+  autoresearch export-result --session <id> --evaluation <run-key> --output <new-dir> --operation-id <id> [--include-code] [--include-protocol] [--log <stages/file>] [--root <dir>] [--json]
   autoresearch inspect-legacy --source <jsonl> [--format <auto|pi|portable>] [--json]
   autoresearch import-legacy --source <jsonl> --config <file> --operation-id <id> [--format <auto|pi|portable>] [--root <dir>] [--json]
   autoresearch init --config <file> --operation-id <id> [--root <dir>] [--json]
@@ -96,6 +101,13 @@ fn main() -> ExitCode {
             legacy::command(command.to_str().unwrap(), rest, as_json)
         }
         [command, rest @ ..]
+            if ["memory", "index", "result-preview", "export-result"]
+                .iter()
+                .any(|name| command == name) =>
+        {
+            results::command(command.to_str().unwrap(), rest, as_json)
+        }
+        [command, rest @ ..]
             if [
                 "init",
                 "status",
@@ -158,7 +170,7 @@ fn doctor(as_json: bool) -> ExitCode {
         "platform": {"os": env::consts::OS, "arch": env::consts::ARCH, "supported": supported},
         "git_on_path": git_found,
         "git_version_verified": false,
-        "capabilities": {"validate_config": true, "manage_sessions": supported, "isolated_workspaces": supported && git_found, "run_experiments": supported && git_found, "pi_adapter": supported, "hook_protocol_version": 1, "inspect_evaluations": supported, "import_legacy": supported}
+        "capabilities": {"validate_config": true, "manage_sessions": supported, "isolated_workspaces": supported && git_found, "run_experiments": supported && git_found, "pi_adapter": supported, "hook_protocol_version": 1, "inspect_evaluations": supported, "import_legacy": supported, "session_memory": ready, "result_bundles": ready}
     }), &format!(
         "Autoresearch {}\nPlatform: {} / {} (supported: {})\nGit executable on PATH: {} (version not verified)\nAvailable: configuration validation, persistent sessions and isolated snapshots. Trusted command supervision and paired evaluations are available.",
         env!("CARGO_PKG_VERSION"), env::consts::OS, env::consts::ARCH, supported, git_found

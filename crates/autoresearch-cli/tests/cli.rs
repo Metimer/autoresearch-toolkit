@@ -935,11 +935,80 @@ fn standalone_acceptance_uses_unicode_paths_and_preserves_source_and_evidence() 
         "export",
     ]);
     assert!(destination.join("candidate.patch").is_file());
+    let preview = run(&["result-preview", "--evaluation", rejected]);
+    assert_eq!(preview["files_published"], false);
+    assert_eq!(preview["preview"]["report"]["decision"], "discarded");
+    let bundle = fixture.0.join("rapport partagé 測定");
+    let exported = run(&[
+        "export-result",
+        "--evaluation",
+        rejected,
+        "--output",
+        bundle.to_str().unwrap(),
+        "--operation-id",
+        "result",
+    ]);
+    assert_eq!(exported["result"]["sha256"], preview["preview"]["sha256"]);
+    assert!(bundle.join("report.md").is_file());
+    assert!(!bundle.join("base").exists());
+    let memory = checked(&[
+        "memory",
+        "--root",
+        pilot.to_str().unwrap(),
+        "--query",
+        "src/main.txt",
+    ]);
+    assert_eq!(memory["rows"].as_array().unwrap().len(), 2);
+    assert_eq!(memory["automatic_rejection"], false);
+    let index = checked(&[
+        "index",
+        "--root",
+        pilot.to_str().unwrap(),
+        "--operation-id",
+        "index",
+    ]);
+    assert_eq!(index["cache_rebuilt"], true);
+    assert!(pilot.join(".auto/engine/memory.json").is_file());
     assert_eq!(
         fs::read(source.join("src/main.txt")).unwrap(),
         b"baseline\n"
     );
     assert_eq!(run(&["status"])["session"]["state"]["attempts_used"], 2);
+}
+
+#[test]
+fn result_commands_reject_ambiguous_or_missing_options_before_creating_files() {
+    let f = Fixture::new();
+    for args in [
+        vec!["index"],
+        vec!["index", "--operation-id", "one", "--operation-id", "two"],
+        vec!["memory", "--include-code"],
+        vec!["memory", "--query"],
+        vec!["memory", "--query", "a", "--query", "b"],
+        vec!["result-preview", "--session", "test"],
+        vec![
+            "result-preview",
+            "--session",
+            "test",
+            "--evaluation",
+            "run-test",
+            "--include-code",
+            "--include-code",
+        ],
+        vec![
+            "export-result",
+            "--session",
+            "test",
+            "--evaluation",
+            "run-test",
+            "--operation-id",
+            "export",
+        ],
+    ] {
+        let result = f.cli().args(args).arg("--json").output().unwrap();
+        assert_eq!(result.status.code(), Some(2), "{result:?}");
+    }
+    assert!(!f.0.join(".auto").exists());
 }
 
 #[test]
