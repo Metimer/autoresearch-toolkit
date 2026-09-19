@@ -48,6 +48,9 @@ pub struct EvaluationReport {
     pub parent_sha256: String,
     pub candidate_sha256: Option<String>,
     pub method_sha256: String,
+    /// Method identity without session bookkeeping, recorded at execution time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_sha256: Option<String>,
     pub decision: Decision,
     pub reason: String,
     pub stages: Vec<Stage>,
@@ -292,7 +295,7 @@ impl SessionGuard {
             ));
         }
         let environment = declared_environment(&config)?;
-        let method = method_hash(&config, &environment)?;
+        let (method, protocol) = method_hashes(&config, &environment)?;
         let previous = if candidate.is_some() {
             let qualification = self.state().qualification.as_ref().ok_or_else(|| {
                 error(
@@ -357,6 +360,7 @@ impl SessionGuard {
             parent_sha256: base_hash,
             candidate_sha256: candidate_hash,
             method_sha256: method,
+            protocol_sha256: Some(protocol),
             decision: Decision::Failed,
             reason: "execution_incomplete".into(),
             stages: Vec::new(),
@@ -880,6 +884,12 @@ fn declared_environment(config: &SessionConfig) -> Result<BTreeMap<String, Strin
     Ok(env)
 }
 fn method_hash(config: &SessionConfig, environment: &BTreeMap<String, String>) -> Result<String> {
+    Ok(method_hashes(config, environment)?.0)
+}
+fn method_hashes(
+    config: &SessionConfig,
+    environment: &BTreeMap<String, String>,
+) -> Result<(String, String)> {
     let mut tools = BTreeMap::new();
     for spec in config
         .checks
@@ -911,6 +921,21 @@ fn method_hash(config: &SessionConfig, environment: &BTreeMap<String, String>) -
             format!("{:x}", hash.finalize()),
         );
     }
+    let protocol = session::hash(
+        &serde_json::to_vec(&serde_json::json!({
+            "version": 1, "scope": config.scope, "checks": config.checks,
+            "benchmark": config.benchmark, "metric": config.metric,
+            "sampling": config.sampling, "execution": config.execution,
+            "secondary_constraints": config.secondary_constraints,
+            "command_timeout_seconds": config.budget.command_timeout_seconds,
+            "max_output_bytes": config.budget.max_output_bytes,
+            "max_artifact_bytes": config.budget.max_artifact_bytes,
+            "environment": environment, "tools": tools,
+            "os": std::env::consts::OS, "arch": std::env::consts::ARCH,
+            "hook_protocol_version": 1,
+        }))
+        .unwrap(),
+    );
     let identity = serde_json::to_vec(&(
         config,
         environment,
@@ -922,10 +947,11 @@ fn method_hash(config: &SessionConfig, environment: &BTreeMap<String, String>) -
     // Preserve method identities without hooks; changed hook semantics require
     // requalification rather than comparison with the old hook protocol.
     if config.execution.hooks.before.is_empty() && config.execution.hooks.after.is_empty() {
-        Ok(session::hash(&identity))
+        Ok((session::hash(&identity), protocol))
     } else {
-        Ok(session::hash(
-            &[b"hooks-v1\0".as_slice(), &identity].concat(),
+        Ok((
+            session::hash(&[b"hooks-v1\0".as_slice(), &identity].concat()),
+            protocol,
         ))
     }
 }

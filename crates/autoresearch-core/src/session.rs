@@ -212,7 +212,7 @@ impl SessionStore {
         Ok(path)
     }
 
-    fn directory(&self, create: bool) -> Result<PathBuf> {
+    pub(crate) fn directory(&self, create: bool) -> Result<PathBuf> {
         let mut path = self.root.clone();
         for name in [".auto", "engine", "sessions"] {
             path.push(name);

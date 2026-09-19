@@ -86,6 +86,28 @@ pub struct WorkspaceResult {
 }
 
 impl SessionGuard {
+    pub(crate) fn snapshot(&self, key: &str) -> Result<Contents> {
+        let (manifest, _, path) = self.load_artifact(key)?;
+        verify_snapshot(&path, &manifest.files, self.config())
+    }
+
+    pub(crate) fn hypothesis(&self, candidate: &str) -> Result<String> {
+        let (manifest, _, _) = self.load_artifact(&format!("candidate-{candidate}"))?;
+        match manifest.request {
+            Request::Candidate { hypothesis, .. } => Ok(hypothesis),
+            _ => fail("corrupt_artifact", "candidate has no preparation record"),
+        }
+    }
+
+    pub(crate) fn source_root(&self) -> Result<PathBuf> {
+        let (manifest, _, _) = self.load_artifact("workspace")?;
+        manifest
+            .source
+            .map(|s| PathBuf::from(s.root))
+            .ok_or_else(|| {
+                SessionError::new("corrupt_artifact", "workspace has no source identity")
+            })
+    }
     /// Freeze a baseline from the declared commit or an explicitly included working tree.
     pub fn create_workspace(
         &mut self,
@@ -339,37 +361,7 @@ impl SessionGuard {
             self.load_artifact(&format!("sealed-{candidate}"))?;
         let files = verify_snapshot(&sealed_path, &sealed.files, self.config())?;
         check_scope(&base.files, &sealed.files, self.config())?;
-        let git_dir = tempfile::tempdir()?;
-        let git = Git::init(&git_dir.path().join("repository.git"))?;
-        let before = git.store_tree(&base_files)?;
-        let after = git.store_tree(&files)?;
-        let patch = git.run(
-            &[
-                "diff",
-                "--binary",
-                "--full-index",
-                "--no-ext-diff",
-                "--no-textconv",
-                "--no-renames",
-                &before,
-                &after,
-                "--",
-            ],
-            None,
-        )?;
-        git.run(&["read-tree", &before], None)?;
-        if !patch.is_empty() {
-            git.run(
-                &["apply", "--cached", "--binary", "--whitespace=nowarn"],
-                Some(patch.clone()),
-            )?;
-        }
-        if git.text(&["write-tree"], None)? != after {
-            return fail(
-                "corrupt_artifact",
-                "export patch does not reproduce the sealed Git tree",
-            );
-        }
+        let patch = verified_patch(&base_files, &files)?;
         let manifest = Manifest {
             format_version: 1,
             operation_id: operation.into(),
@@ -883,7 +875,7 @@ pub(crate) fn owned_directory(path: &Path) -> Result<()> {
     }
     session::check_directory(path)
 }
-fn sync_tree(root: &Path) -> Result<()> {
+pub(crate) fn sync_tree(root: &Path) -> Result<()> {
     session::check_directory(root)?;
     for entry in fs::read_dir(root)? {
         let path = entry?.path();
@@ -919,7 +911,7 @@ pub(crate) fn directory_bytes(root: &Path) -> Result<u64> {
     }
     walk(root, 0, &mut 0)
 }
-fn publish_directory(staging: &Path, destination: &Path) -> Result<()> {
+pub(crate) fn publish_directory(staging: &Path, destination: &Path) -> Result<()> {
     // Atomic exclusive reservation prevents overwriting another publisher, including
     // an empty existing directory. A crash before rename leaves an empty reservation
     // for inspection, never a journaled artifact.
@@ -966,6 +958,47 @@ fn verify_export(output: &Path, digest: &str, config: &SessionConfig) -> Result<
     }
     if inventory(&scan(&output.join("base"), config, false)?) != integrity.base_files {
         return fail("corrupt_artifact", "export baseline changed");
+    }
+    Ok(())
+}
+
+/// Create and verify a deterministic binary patch without touching either input.
+pub(crate) fn verified_patch(base: &Contents, candidate: &Contents) -> Result<Vec<u8>> {
+    let directory = tempfile::tempdir()?;
+    let git = Git::init(&directory.path().join("repository.git"))?;
+    let before = git.store_tree(base)?;
+    let after = git.store_tree(candidate)?;
+    let patch = git.run(
+        &[
+            "diff",
+            "--binary",
+            "--full-index",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            &before,
+            &after,
+            "--",
+        ],
+        None,
+    )?;
+    verify_patch_with_git(&git, &before, &after, &patch)?;
+    Ok(patch)
+}
+
+fn verify_patch_with_git(git: &Git, before: &str, after: &str, patch: &[u8]) -> Result<()> {
+    git.run(&["read-tree", before], None)?;
+    if !patch.is_empty() {
+        git.run(
+            &["apply", "--cached", "--binary", "--whitespace=nowarn"],
+            Some(patch.to_vec()),
+        )?;
+    }
+    if git.text(&["write-tree"], None)? != after {
+        return fail(
+            "corrupt_artifact",
+            "patch does not reproduce the declared tree",
+        );
     }
     Ok(())
 }
