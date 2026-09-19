@@ -668,6 +668,44 @@ pub(crate) fn check_scope(
     Ok(())
 }
 fn check_protected(files: &Contents, config: &SessionConfig) -> Result<()> {
+    // Protect direct workspace file operands, including interpreter scripts.
+    // Inline code and transitive dependencies remain trusted declarations.
+    for hook in config
+        .execution
+        .hooks
+        .before
+        .iter()
+        .chain(&config.execution.hooks.after)
+    {
+        for operand in std::iter::once(&hook.executable).chain(&hook.args) {
+            let path = Path::new(&hook.cwd).join(operand);
+            let mut normalized = PathBuf::new();
+            let mut local = true;
+            for part in path.components() {
+                match part {
+                    std::path::Component::CurDir => {}
+                    std::path::Component::Normal(part) => normalized.push(part),
+                    std::path::Component::ParentDir => {
+                        if !normalized.pop() {
+                            local = false;
+                        }
+                    }
+                    _ => local = false,
+                }
+            }
+            let Some(path) = normalized.to_str().filter(|_| local) else {
+                continue;
+            };
+            if covers(&config.scope.generated_paths, path)
+                || (files.contains_key(path) && !covers(&config.scope.protected_paths, path))
+            {
+                return fail(
+                    "scope_violation",
+                    "workspace files referenced directly by hooks must be protected and not generated",
+                );
+            }
+        }
+    }
     for (path, expected) in &config.scope.protected_sha256 {
         if !files
             .get(path)
@@ -805,6 +843,7 @@ pub(crate) fn verify_snapshot(
             "frozen snapshot content or executable modes changed",
         );
     }
+    check_protected(&files, config)?;
     Ok(files)
 }
 pub(crate) fn write_tree(root: &Path, files: &Contents) -> Result<()> {

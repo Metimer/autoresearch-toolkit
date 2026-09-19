@@ -93,6 +93,96 @@ impl Fixture {
     }
 }
 const BENCH:&str="import json\nfrom pathlib import Path\nvalue=int(Path('src/value').read_text())\nprint('METRIC '+json.dumps(dict(name='bench_ms',value=value,unit='ms')))\n";
+
+#[test]
+fn hooks_receive_versioned_context_and_cannot_supply_a_verdict() {
+    let mut f = Fixture::new(BENCH);
+    let mut config = f.config.get().clone();
+    let hook = CommandSpec {
+        executable: "/bin/sh".into(),
+        args: vec!["-c".into(), "printf '%s:%s:%s:%s:%s:%s\\n' \"$AUTORESEARCH_HOOK_VERSION\" \"$AUTORESEARCH_HOOK_PHASE\" \"$AUTORESEARCH_HOOK_SIDE\" \"$AUTORESEARCH_SESSION_ID\" \"$AUTORESEARCH_OPERATION_ID\" \"$AUTORESEARCH_DECISION\"; printf 'METRIC {\"name\":\"bench_ms\",\"value\":0,\"unit\":\"ms\"}\\n'; test \"$AUTORESEARCH_HOOK_SIDE\" != candidate".into()],
+        cwd: ".".into(),
+    };
+    config.execution.hooks.before.push(hook.clone());
+    config.execution.hooks.after.push(hook);
+    f.config = ValidatedConfig::try_from(config).unwrap();
+    let mut session = f.session();
+    let baseline = session.baseline("baseline").unwrap();
+    assert_eq!(baseline.report.decision, Decision::Qualified);
+    assert!(baseline
+        .report
+        .samples
+        .iter()
+        .all(|s| s.metrics["bench_ms"] == 10.0));
+    candidate(&mut session, "fast", "5");
+    let result = session.evaluate_candidate("trial", "fast").unwrap();
+    assert_eq!(result.report.decision, Decision::Failed);
+    assert!(result.report.after_hook_failed);
+    assert_eq!(session.state().accepted.as_deref(), Some("workspace"));
+    let stages = f.root.join(".auto/engine/sessions/test/executions");
+    let mut output = String::new();
+    for execution in fs::read_dir(stages).unwrap() {
+        for stage in fs::read_dir(execution.unwrap().path().join("stages")).unwrap() {
+            let path = stage.unwrap().path();
+            if path.extension().is_some_and(|ext| ext == "stdout") {
+                output.push_str(&fs::read_to_string(path).unwrap());
+            }
+        }
+    }
+    assert!(output.contains("1:before:reference:test:baseline:pending"));
+    assert!(output.contains("1:after:reference:test:baseline:qualified"));
+    assert!(output.contains("1:before:candidate:test:trial:pending"));
+    assert!(output.contains("1:after:candidate:test:trial:failed"));
+}
+
+#[test]
+fn direct_hook_scripts_must_be_protected_before_snapshot_publication() {
+    let mut f = Fixture::new(BENCH);
+    let mut config = f.config.get().clone();
+    config
+        .scope
+        .protected_paths
+        .retain(|path| path != "check.py");
+    config.execution.hooks.before.push(CommandSpec {
+        executable: "python3".into(),
+        args: vec!["./check.py".into()],
+        cwd: ".".into(),
+    });
+    f.config = ValidatedConfig::try_from(config).unwrap();
+    let mut session = SessionStore::new(&f.root)
+        .unwrap()
+        .init(f.config.clone(), "init", 1)
+        .unwrap();
+    let error = session
+        .create_workspace("workspace", LocalChanges::Exclude, 2)
+        .unwrap_err();
+    assert_eq!(error.code, "scope_violation");
+    assert!(session.state().artifacts.is_empty());
+}
+
+#[test]
+fn before_hook_timeout_blocks_sampling_and_charges_the_shared_budget() {
+    let mut f = Fixture::new(BENCH);
+    let mut config = f.config.get().clone();
+    config.budget.command_timeout_seconds = 1;
+    config.execution.hooks.before.push(CommandSpec {
+        executable: "/bin/sh".into(),
+        args: vec!["-c".into(), "sleep 30 & wait".into()],
+        cwd: ".".into(),
+    });
+    f.config = ValidatedConfig::try_from(config).unwrap();
+    let mut session = f.session();
+    let result = session.baseline("baseline").unwrap();
+    assert_eq!(result.report.decision, Decision::Failed);
+    assert_eq!(result.report.reason, "command_timeout");
+    assert!(result.report.samples.is_empty());
+    assert!(session.state().active_ms_used >= 1000);
+    assert!(session.state().qualification.is_none());
+    assert!(!f
+        .root
+        .join(".auto/engine/sessions/test/process.json")
+        .exists());
+}
 fn candidate(session: &mut SessionGuard, id: &str, value: &str) {
     let now = autoresearch_core::supervisor::now_ms().unwrap();
     let prepared = session

@@ -739,6 +739,29 @@ impl Engine<'_> {
                 .into(),
         );
         environment.insert("AUTORESEARCH_SAMPLE_INDEX".into(), index.to_string());
+        if matches!(name, "before" | "after") {
+            environment.insert("AUTORESEARCH_HOOK_VERSION".into(), "1".into());
+            environment.insert("AUTORESEARCH_HOOK_PHASE".into(), name.into());
+            environment.insert("AUTORESEARCH_HOOK_SIDE".into(), side.into());
+            environment.insert(
+                "AUTORESEARCH_SESSION_ID".into(),
+                self.config.session_id.clone(),
+            );
+            environment.insert(
+                "AUTORESEARCH_OPERATION_ID".into(),
+                self.report.operation_id.clone(),
+            );
+            let decision = if name == "before" {
+                "pending".into()
+            } else {
+                serde_json::to_value(self.report.decision)
+                    .unwrap()
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            };
+            environment.insert("AUTORESEARCH_DECISION".into(), decision);
+        }
         environment.insert(
             "AUTORESEARCH_INPUT_SHA256".into(),
             self.config.sampling.input_sha256.clone(),
@@ -888,16 +911,23 @@ fn method_hash(config: &SessionConfig, environment: &BTreeMap<String, String>) -
             format!("{:x}", hash.finalize()),
         );
     }
-    Ok(session::hash(
-        &serde_json::to_vec(&(
-            config,
-            environment,
-            tools,
-            std::env::consts::OS,
-            std::env::consts::ARCH,
-        ))
-        .unwrap(),
+    let identity = serde_json::to_vec(&(
+        config,
+        environment,
+        tools,
+        std::env::consts::OS,
+        std::env::consts::ARCH,
     ))
+    .unwrap();
+    // Preserve method identities without hooks; changed hook semantics require
+    // requalification rather than comparison with the old hook protocol.
+    if config.execution.hooks.before.is_empty() && config.execution.hooks.after.is_empty() {
+        Ok(session::hash(&identity))
+    } else {
+        Ok(session::hash(
+            &[b"hooks-v1\0".as_slice(), &identity].concat(),
+        ))
+    }
 }
 fn working_directory(root: &Path, relative: &str) -> Result<PathBuf> {
     let mut path = root.to_path_buf();

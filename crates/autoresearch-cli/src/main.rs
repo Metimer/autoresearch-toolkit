@@ -51,7 +51,7 @@ history lists completed evaluations; report defaults to the qualified accepted r
 Read evaluation.report.decision: exit zero also covers rejected or cancelled evaluations.
 Workspace commands use isolated Git plumbing and never run project commands.
 Execution requires trusted commands and network=allowed; there is no network sandbox.
-The Pi adapter is not implemented yet.
+The optional Pi adapter is available separately in adapters/pi/.
 ";
 
 fn main() -> ExitCode {
@@ -158,7 +158,7 @@ fn doctor(as_json: bool) -> ExitCode {
         "platform": {"os": env::consts::OS, "arch": env::consts::ARCH, "supported": supported},
         "git_on_path": git_found,
         "git_version_verified": false,
-        "capabilities": {"validate_config": true, "manage_sessions": supported, "isolated_workspaces": supported && git_found, "run_experiments": supported && git_found, "pi_adapter": false, "inspect_evaluations": supported, "import_legacy": supported}
+        "capabilities": {"validate_config": true, "manage_sessions": supported, "isolated_workspaces": supported && git_found, "run_experiments": supported && git_found, "pi_adapter": supported, "hook_protocol_version": 1, "inspect_evaluations": supported, "import_legacy": supported}
     }), &format!(
         "Autoresearch {}\nPlatform: {} / {} (supported: {})\nGit executable on PATH: {} (version not verified)\nAvailable: configuration validation, persistent sessions and isolated snapshots. Trusted command supervision and paired evaluations are available.",
         env!("CARGO_PKG_VERSION"), env::consts::OS, env::consts::ARCH, supported, git_found
