@@ -78,12 +78,26 @@ follow the Rust session contract; there is no automatic experiment loop.
 
 ## Native target matrix
 
-| Target | Qualification environment | Candidate status |
+| Target | Native CI environment | Artifact name |
 | --- | --- | --- |
-| `aarch64-apple-darwin` | Native macOS ARM64 | Local qualification; remote matrix still required |
-| `aarch64-unknown-linux-gnu` | Native ARM64 Linux / Debian 12 container | Local engine qualification; remote matrix still required |
-| `x86_64-unknown-linux-gnu` | Ubuntu 24.04 x64 CI runner | Remote qualification pending |
-| `x86_64-apple-darwin` | macOS 15 Intel CI runner | Remote qualification pending |
+| `aarch64-apple-darwin` | macOS 15 ARM64 | `candidate-aarch64-apple-darwin` |
+| `aarch64-unknown-linux-gnu` | Ubuntu 24.04 ARM64 | `candidate-aarch64-unknown-linux-gnu` |
+| `x86_64-unknown-linux-gnu` | Ubuntu 24.04 x64 | `candidate-x86_64-unknown-linux-gnu` |
+| `x86_64-apple-darwin` | macOS 15 Intel | `candidate-x86_64-apple-darwin` |
+
+Use the [candidate workflow runs](https://github.com/Metimer/autoresearch-toolkit/actions/workflows/candidate.yml?query=branch%3Aqualification%2F1.0.0-rc.1)
+to inspect results and download the nine artifacts: four native engine/Pi packages
+and five skills packages. Each contains an archive, checksums and qualification
+reports; native packages additionally include the Pi loader report. Match the
+run's commit to `BUNDLE.json.source_commit`, require `source_dirty: false`, and
+check the archive and manifest hashes against the reports. The engine and Pi
+reports must refer to the same manifest.
+
+Qualification requires both that candidate run and the
+[Checks workflow](https://github.com/Metimer/autoresearch-toolkit/actions/workflows/ci.yml?query=branch%3Aqualification%2F1.0.0-rc.1)
+to succeed for the same source commit. A successful job on an older commit does
+not qualify a newer artifact. CI artifacts are reviewable candidates, not a
+tagged stable release; the workflow does not merge the qualification branch.
 
 Builds run natively for each target, with Rust 1.81 and locked dependencies. Linux
 packages depend on the builder's glibc; they are not advertised as universal

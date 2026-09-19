@@ -25,6 +25,11 @@ stable v1 requires all four announced targets, full failure/recovery tests,
 packaged Pi loading and clean-source artifact qualification to pass on the final
 revision. No push, tag, upload or release publication is performed automatically.
 
+The qualification branch runs both general checks and native package tests.
+See the [CI results and artifact instructions](INSTALL.md#native-target-matrix);
+both workflows must pass on the same commit. CI uploads candidate artifacts after
+successful package checks. This does not create a GitHub release or change `main`.
+
 Known limits: trusted commands; no system sandbox or hard OS disk quota; external
 and transitive inputs remain the user's responsibility; no native Windows
 qualification; no macOS signing/notarization. Startup/import does not perform a

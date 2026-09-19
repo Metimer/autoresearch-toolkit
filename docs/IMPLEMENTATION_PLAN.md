@@ -4,8 +4,9 @@ Statut : lots 0–10 implémentés pour une exécution locale de confiance sur P
 Supervision, qualification, comparaisons confirmées et promotion atomique sont
 disponibles et intégrés aux skills. Import historique, reprise contrôlée, adaptateur
 Pi, mémoire et bundles de résultats disponibles. Le lot 11 dispose des archives
-et de la qualification locale de la candidate `1.0.0-rc.1` ; la matrice distante
-complète reste nécessaire avant une v1 stable. Les limites
+et de la qualification locale de la candidate `1.0.0-rc.1` ; la branche distante
+`qualification/1.0.0-rc.1` exécute la matrice complète. Les résultats et artefacts
+par révision sont accessibles depuis `INSTALL.md`. Les limites
 d’isolation, de quotas et de preuve sont détaillées dans `RUST_ENGINE.md`.
 Référence de départ : commit `130f305`, version du toolkit `0.1.0`.
 Responsable du projet et des nouvelles contributions : Metimer.
@@ -821,8 +822,17 @@ Validation locale : suites Rust sur macOS ARM64 et Linux ARM64 (conteneur Debian
 profils couvrent les cinq hôtes, les altérations, fichiers non inventoriés,
 chemins dangereux et destinations existantes.
 
-Le lot 11 reste ouvert pour la qualification distante complète, notamment Intel
-Linux/macOS et le chargement Pi sur chaque cible finale. Une candidate locale ne
-vaut pas une v1 stable. Les limites d’exécution de confiance restent applicables ;
-Windows/WSL et la signature/notarisation macOS ne sont pas qualifiés. Aucun push,
-tag ou publication effectué.
+La branche de qualification est poussée avec autorisation explicite ; `main`
+reste inchangée. Un premier passage CI a révélé un conflit Linux `ETXTBSY` lors
+de la copie du binaire par un test multithreadé. La copie est désormais réalisée
+dans un processus distinct pour ne pas transmettre son descripteur d’écriture
+aux processus des autres tests. Les assertions du parcours restent inchangées.
+
+Critère de clôture technique du lot 11 : les workflows `Checks` et
+`Candidate packages` réussissent sur la même révision, avec quatre artefacts
+natifs et cinq artefacts skills ; inventaires et rapports doivent correspondre
+au commit qualifié. Le guide d’installation donne les liens de suivi et la
+méthode de vérification. La promotion en version stable, le merge, le tag et la
+release restent des étapes distinctes. Les limites d’exécution de confiance
+restent applicables ; Windows/WSL et la signature/notarisation macOS ne sont pas
+qualifiés.

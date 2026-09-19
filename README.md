@@ -6,8 +6,9 @@ also runs directly from the CLI without Pi or an LLM.
 
 **1.0.0-rc.1** is available as a locally buildable candidate. See the
 [installation and compatibility guide](docs/INSTALL.md) and
-[release notes](docs/RELEASE_NOTES.md). Stable v1 still requires the complete
-native qualification matrix to pass.
+[release notes](docs/RELEASE_NOTES.md). The
+[qualification matrix](docs/INSTALL.md#native-target-matrix) links CI results and
+artifacts by source revision. Stable publication is a separate step.
 
 The workflow has two stages:
 

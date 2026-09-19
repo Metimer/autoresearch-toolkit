@@ -633,8 +633,10 @@ as part of the normal suite.
 
 Node.js 24 is needed for the optional Pi adapter and archived-reader tests. The Rust
 binary needs neither Node.js nor Pi. CI defines Linux/macOS jobs for Rust 1.81 and
-stable, Python 3.10/3.13, plus a Node 24 job; remote execution remains unverified. This tranche was checked locally on macOS
-with Rust 1.81 and Git 2.47.0.
+stable, Python 3.10/3.13, plus Node 24 jobs for the adapter and archived reader.
+Native package jobs additionally cover ARM64 and Intel on Linux/macOS. Use the
+[qualification results and artifacts](INSTALL.md#native-target-matrix) for the
+exact tested revision; local results alone do not qualify the remote matrix.
 
 The archive remains unchanged and is not imported automatically. Historical
 unknown outcomes and malformed records never become verified Rust results.
