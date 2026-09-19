@@ -1,0 +1,77 @@
+name: Candidate packages
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: rustup toolchain install 1.81.0 --profile minimal
+      - run: rustup default 1.81.0
+      - run: cargo test --workspace --locked
+      - run: python3 -m unittest discover -s tests -v
+      - name: Build native engine and Pi candidate
+        run: python3 scripts/release.py --profile engine --agent pi --pi-adapter --target '${{ matrix.target }}' --output dist/candidate
+      - name: Verify archive and exercise packaged demonstrations
+        run: python3 scripts/qualify.py --archive dist/candidate/*.tar.gz --output dist/candidate/qualification.json
+      - name: Load the packaged Pi extension
+        run: |
+          mkdir dist/extracted
+          tar -xzf dist/candidate/*.tar.gz -C dist/extracted
+          npm --prefix dist/extracted/autoresearch-toolkit/adapters/pi ci --ignore-scripts --no-audit --no-fund
+          node dist/extracted/autoresearch-toolkit/scripts/qualify_pi.mjs dist/extracted/autoresearch-toolkit > dist/candidate/pi-qualification.json
+      - name: Save candidate artifacts for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: candidate-${{ matrix.target }}
+          path: dist/candidate/
+          if-no-files-found: error
+
+  skills:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        agent: [codex, claude, cursor, pi, generic]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - run: python3 scripts/release.py --profile skills --agent '${{ matrix.agent }}' --output dist/candidate
+      - run: python3 scripts/qualify.py --archive dist/candidate/*.tar.gz --output dist/candidate/qualification.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-skills-${{ matrix.agent }}
+          path: dist/candidate/
+          if-no-files-found: error

@@ -73,7 +73,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--agent", required=True, choices=MANIFESTS)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--profile", choices=("skills", "engine"),
+                        help="build a versioned release archive in a new output directory")
+    parser.add_argument("--target")
+    parser.add_argument("--pi-adapter", action="store_true")
+    parser.add_argument("--offline", action="store_true")
     args = parser.parse_args()
+    if args.profile:
+        from release import build
+        import subprocess
+        try:
+            print(build(args.profile, args.agent, args.output, args.target, args.pi_adapter, args.offline))
+            return 0
+        except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+            parser.exit(1, f"Release export failed: {exc}\n")
+    if args.target or args.pi_adapter or args.offline:
+        parser.error("release options require --profile")
     try:
         result = export(args.agent, args.output)
     except (OSError, ValueError) as exc:
