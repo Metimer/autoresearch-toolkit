@@ -827,7 +827,16 @@ fn standalone_acceptance_uses_unicode_paths_and_preserves_source_and_evidence() 
     let pilot = fixture.0.join("pilote séparé 測定");
     fs::create_dir(&pilot).unwrap();
     let binary = fixture.0.join("moteur Rust été");
-    fs::copy(env!("CARGO_BIN_EXE_autoresearch"), &binary).unwrap();
+    // Copy in a separate process: parallel tests can fork while fs::copy holds
+    // the destination open for writing. An inherited descriptor can briefly
+    // make Linux reject exec with ETXTBSY even after our copy has returned.
+    // Waiting for cp closes its writer without sharing it with those forks.
+    let copied = Command::new("cp")
+        .arg(env!("CARGO_BIN_EXE_autoresearch"))
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(copied.status.success(), "{copied:?}");
     let raw = |args: &[&str]| {
         Command::new(&binary)
             .current_dir(&fixture.0)
