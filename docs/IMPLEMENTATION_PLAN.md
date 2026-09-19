@@ -2,7 +2,10 @@
 
 Statut : lots 0–10 implémentés pour une exécution locale de confiance sur POSIX.
 Supervision, qualification, comparaisons confirmées et promotion atomique sont
-disponibles et intégrés aux skills. Import historique, reprise contrôlée, adaptateur Pi, mémoire et bundles de résultats disponibles ; prochaine tranche : distribution et qualification (lot 11). Les limites
+disponibles et intégrés aux skills. Import historique, reprise contrôlée, adaptateur
+Pi, mémoire et bundles de résultats disponibles. Le lot 11 dispose des archives
+et de la qualification locale de la candidate `1.0.0-rc.1` ; la matrice distante
+complète reste nécessaire avant une v1 stable. Les limites
 d’isolation, de quotas et de preuve sont détaillées dans `RUST_ENGINE.md`.
 Référence de départ : commit `130f305`, version du toolkit `0.1.0`.
 Responsable du projet et des nouvelles contributions : Metimer.
@@ -789,3 +792,37 @@ de métriques et mesures sont publiés ; aucun détecteur universel de secrets n
 annoncé. Sélectionner le code ou le protocole peut inclure des données privées.
 Les dépendances externes et transitives restent à fournir. La CI distante et les
 tests des paquets distribués restent au lot 11 ; aucun push/publication effectué.
+
+### Avancement du lot 11 — Candidate et qualification des paquets
+
+- Versions Cargo, manifestes des cinq hôtes et adaptateur Pi alignés sur
+  `1.0.0-rc.1`. Paquets npm privés, aucune publication ni installation automatique.
+- Constructeur d’archives avec profils explicites `skills` et `engine`, cible
+  native Linux/macOS et adaptateur Pi sélectionné séparément. Export de dossiers
+  historique conservé. Destinations neuves, inventaires fermés et refus des liens.
+- `BUNDLE.json` décrit révision source, état propre/modifié, empreintes, tailles et
+  permissions ; `SHA256SUMS` lie l’archive. Métadonnées tar normalisées, sans
+  promesse de binaires identiques entre SDK. Le nom du manifeste évite le conflit
+  avec `package.json` sur un système de fichiers insensible à la casse.
+- Graphe Cargo normal/build résolu depuis le lockfile, notices originales des
+  dépendances et de Rust incluses ; absence de licence bloquante. Dépendances npm
+  installées explicitement depuis le lockfile, sans vendoring dans l’archive.
+- Qualification hors checkout : extraction contrôlée, vérification d’inventaire,
+  deux démonstrations déterministes avec référence qualifiée, amélioration gardée,
+  régression rejetée, source préservée, export des résultats et arrêt/reprise.
+  Chargeur Pi réel et négociation avec le binaire empaqueté sans fournisseur LLM.
+- Guide anglais d’installation, profils, compatibilité, mise à niveau et retour
+  arrière ; notes de version candidate. Archives et rapports générés sous `dist/`,
+  ignorés par Git. Workflow natif pour les quatre cibles, plus les cinq profils
+  skills ; aucune création de release dans le workflow.
+
+Validation locale : suites Rust sur macOS ARM64 et Linux ARM64 (conteneur Debian
+12), paquets natifs et démonstrations depuis les archives extraites. Les tests de
+profils couvrent les cinq hôtes, les altérations, fichiers non inventoriés,
+chemins dangereux et destinations existantes.
+
+Le lot 11 reste ouvert pour la qualification distante complète, notamment Intel
+Linux/macOS et le chargement Pi sur chaque cible finale. Une candidate locale ne
+vaut pas une v1 stable. Les limites d’exécution de confiance restent applicables ;
+Windows/WSL et la signature/notarisation macOS ne sont pas qualifiés. Aucun push,
+tag ou publication effectué.

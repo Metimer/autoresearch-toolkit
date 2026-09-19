@@ -5,7 +5,7 @@ engine session; Rust owns execution, budgets, cancellation, evidence and verdict
 The adapter does not start an autonomous loop or resume work on session events.
 
 Compatibility is pinned to **Pi `0.85.1`**, **Node.js 24**, and the Toolkit
-**`0.2.0-dev`** CLI with JSON envelope version 1, Pi support and hook protocol 1.
+**`1.0.0-rc.1`** CLI with JSON envelope version 1, Pi support and hook protocol 1.
 The lockfile records the tested dependency graph. Local acceptance used macOS,
 Node.js 24.20.0 and Rust 1.81; Linux/macOS CI is configured separately.
 
@@ -43,8 +43,10 @@ different session automatically. See the upstream
 [extension loading documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md).
 
 The root package and exported portable bundles continue to load skills only.
-This adapter is a separate, local development package; registry publication and
-bundled dependency notices remain release work.
+An engine archive built with `--agent pi --pi-adapter` includes this adapter and
+registers it in the packaged manifest. See the
+[candidate installation guide](../../docs/INSTALL.md). npm dependencies remain
+separately installed; registry publication is not enabled.
 
 ## Tools and stopping
 
@@ -94,7 +96,7 @@ inspection/recovery procedure; this adapter is not a process isolation sandbox.
 
 ## Checks
 
-From the repository root:
+From a full source checkout:
 
 ```sh
 cargo build --locked
@@ -107,6 +109,17 @@ real Rust CLI, temporary Git repositories and an in-memory Pi session. They cove
 qualification, promotion, idempotent retry, history, reports, export, preserved
 source files, cancellation and process cleanup. No provider request or API key is
 needed. Transport tests reject incompatible, oversized and inconsistent responses.
+
+From an extracted engine/Pi archive, after explicitly installing its dependencies:
+
+```sh
+node /absolute/path/to/autoresearch-toolkit/scripts/qualify_pi.mjs \
+  /absolute/path/to/autoresearch-toolkit
+```
+
+This package check loads the real Pi extension and negotiates with the bundled
+engine without a provider request. The full integration suite above requires the
+source checkout.
 
 Hooks are configured in the engine contract, not in Pi. See the
 [versioned hook contract](../../docs/RUST_ENGINE.md#hook-contract-version-1).

@@ -664,7 +664,9 @@ Multi-session search and selective result bundles are now available through
 [memory and result bundles](RESULTS.md) for the CLI, protocol fingerprints,
 privacy defaults, reconstruction and crash recovery. These operations do not
 launch experiments; `doctor` advertises `session_memory` and `result_bundles`.
-Release packaging and qualification remain the next plan item.
+Candidate packaging now provides native engine archives, dependency notices and
+installed-package demonstrations. See [installation and compatibility](INSTALL.md).
+The complete remote target matrix remains necessary before stable v1 qualification.
 See `IMPLEMENTATION_PLAN.md`.
 
 ## Hook contract version 1

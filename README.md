@@ -4,6 +4,11 @@ A Rust engine and agent skills for measured optimization: establish a baseline,
 test one hypothesis at a time, and keep only verified improvements. The engine
 also runs directly from the CLI without Pi or an LLM.
 
+**1.0.0-rc.1** is available as a locally buildable candidate. See the
+[installation and compatibility guide](docs/INSTALL.md) and
+[release notes](docs/RELEASE_NOTES.md). Stable v1 still requires the complete
+native qualification matrix to pass.
+
 The workflow has two stages:
 
 | Skill | Purpose |
@@ -18,8 +23,8 @@ The workflow has two stages:
 | Rust | The engine owns isolated candidates, command budgets, checks, measurements and acceptance. | An independently installed/built `autoresearch` binary, Git, Linux or macOS, and the project's command dependencies. |
 | Portable | The agent drives the loop and enforces scope/session budgets; a Python helper bounds each measurement invocation. | An agent with file/shell tools, Git and Python 3.10+ on Linux/macOS. |
 
-Both modes need a target project with executable behavior checks. Use WSL on
-Windows. New skill sessions prefer a compatible engine when available; explicitly
+Both modes need a target project with executable behavior checks. Windows and WSL
+are not qualified targets for this candidate. New skill sessions prefer a compatible engine when available; explicitly
 request portable mode if desired. The selected mode is announced. Existing
 sessions keep their mode: an absent/incompatible Rust binary blocks a Rust session
 without downloading anything or silently falling back to portable execution.
@@ -77,6 +82,23 @@ as shown above. Choose one discovery method to avoid duplicates. Providing a
 manifest does not guarantee that every version of the host can load it.
 
 ## Export a bundle
+
+Build a versioned archive with an explicit profile:
+
+```sh
+python3 scripts/release.py --profile skills --agent codex --output dist/skills-codex
+python3 scripts/release.py --profile engine --agent pi --pi-adapter --output dist/engine-pi
+python3 scripts/qualify.py --archive dist/engine-pi/ARCHIVE_NAME.tar.gz \
+  --output dist/engine-pi/qualification.json
+```
+
+Replace `ARCHIVE_NAME` with the filename printed by the builder. Engine archives
+include the native CLI, dependency notices, and two reproducible demonstrations.
+The optional Pi adapter is selected explicitly. Every archive has a file inventory
+and checksum; building and qualifying it does not publish anything. See the
+[installation guide](docs/INSTALL.md) for platform requirements and Pi setup.
+
+The original skills-only folder export remains available:
 
 From the repository root, create a bundle for your chosen host:
 
@@ -259,8 +281,8 @@ the default report excludes them. See [memory and result bundles](docs/RESULTS.m
 for export, reproduction, privacy and exact duplicate detection.
 
 See [Rust engine development](docs/RUST_ENGINE.md) for the configuration contract,
-commands, recovery procedure and storage guarantees. The existing skill bundles
-do not include the Rust sources or binary.
+commands, recovery procedure and storage guarantees. Skills-only bundles
+do not include the Rust sources or binary; engine archives include the native CLI.
 
 ### Checks
 
