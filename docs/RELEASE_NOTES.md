@@ -23,7 +23,8 @@ Validation is recorded against archive hashes. Native macOS and local Linux
 container checks do not replace the remote compatibility matrix. Promotion to
 stable v1 requires all four announced targets, full failure/recovery tests,
 packaged Pi loading and clean-source artifact qualification to pass on the final
-revision. No push, tag, upload or release publication is performed automatically.
+revision. Local build and qualification commands do not push, tag, upload or
+publish releases.
 
 The qualification branch runs both general checks and native package tests.
 See the [CI results and artifact instructions](INSTALL.md#native-target-matrix);

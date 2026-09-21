@@ -70,17 +70,21 @@ unless separately requested.
 
 The toolkit provides the following manifests, all using the same skills:
 
-| Host | Included manifest |
-| --- | --- |
-| Codex | `.codex-plugin/plugin.json` |
-| Claude Code | `.claude-plugin/plugin.json` |
-| Cursor | `.cursor-plugin/plugin.json` |
-| Pi | `package.json`, through `pi.skills` |
-| Agent Plugins | `plugin.json` |
+| Host | Installation and usage | Included manifest |
+| --- | --- | --- |
+| Codex | [Codex guide](docs/harnesses/codex/README.md) | `.codex-plugin/plugin.json` |
+| Claude Code | [Claude Code guide](docs/harnesses/claude/README.md) | `.claude-plugin/plugin.json` |
+| Cursor | [Cursor guide](docs/harnesses/cursor/README.md) | `.cursor-plugin/plugin.json` |
+| Pi | [Pi guide](docs/harnesses/pi/README.md) | `package.json`, through `pi.skills` |
+| Agent Plugins | [Generic host guide](docs/harnesses/generic/README.md) | `plugin.json` |
 
 Use your host's loading mechanism or give the agent the skill's path directly,
 as shown above. Choose one discovery method to avoid duplicates. Providing a
 manifest does not guarantee that every version of the host can load it.
+Each guide covers installation, invocation, updates, removal and troubleshooting,
+with its actual validation level. The [shared workflow](docs/HARNESS_WORKFLOW.md)
+provides engine selection, complete prompts, stop/resume and result inspection.
+Each export includes its selected guide and the shared documentation.
 
 ## Export a bundle
 

@@ -52,6 +52,8 @@ scope, budget and deadline; the example contract contains placeholders.
 Place the extracted `autoresearch-toolkit` folder in the location supported by
 the chosen agent. Its selected manifest advertises the packaged skills. The
 root package remains `private: true`. Existing agent configuration is not edited.
+Open the harness guide linked from the package README for the exact loading
+procedure, skill names and uninstall steps. Folder exports also include that guide.
 
 For an engine archive explicitly built with Pi, first install its pinned
 dependencies from the extracted package, after inventory qualification:

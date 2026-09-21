@@ -836,3 +836,25 @@ méthode de vérification. La promotion en version stable, le merge, le tag et l
 release restent des étapes distinctes. Les limites d’exécution de confiance
 restent applicables ; Windows/WSL et la signature/notarisation macOS ne sont pas
 qualifiés.
+
+### Documentation et intégration des harness
+
+- Guides anglais dédiés à Codex, Claude Code, Cursor, Pi et au format générique :
+  installation locale, invocation, prérequis, niveau de validation, mise à jour,
+  désinstallation et dépannage. Parcours commun pour configuration du moteur,
+  prompts de préparation/exécution, arrêt/reprise et lecture des résultats.
+- README propre au profil exporté, guide du harness sélectionné et documentation
+  commune inclus dans les exports de dossiers et archives. Aucun lien local vers
+  un guide absent ; pas de dépendance aux fichiers d’audit ignorés.
+- Vérifications locales du 21 septembre 2026 : découverte native des deux skills
+  par Codex 0.154.0 (`skills/list`, zéro tour de modèle), validation stricte du
+  manifeste Claude Code 2.1.278, chargement des skills exportés par Pi 0.85.1 sans
+  diagnostic. Cursor 3.19.13 identifié, procédure vérifiée dans sa documentation.
+- Les parcours interactifs Codex/Claude/Cursor et l’exécution avec un fournisseur
+  choisi restent distincts de ces vérifications sans modèle. La documentation
+  n’annonce pas de qualification de ces parcours. Le format générique ne désigne
+  pas une application testée.
+
+La révision `5f0cd3b` a obtenu 20/20 jobs CI et neuf artefacts vérifiés. Les guides
+et inventaires modifiés nécessitent une nouvelle qualification de leur propre
+révision avant publication stable ; aucune fusion ou release n’est automatique.
