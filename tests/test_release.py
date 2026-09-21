@@ -2,6 +2,7 @@ import io
 import json
 from pathlib import Path
 import sys
+import re
 import tarfile
 import tempfile
 import unittest
@@ -28,6 +29,15 @@ class ReleaseTests(unittest.TestCase):
                     self.assertNotIn("bin/autoresearch", manifest["files"])
                     self.assertFalse(any(name.startswith(("originals/", ".auto/", "node_modules/")) for name in manifest["files"]))
                     self.assertEqual(manifest["version"], "1.0.0-rc.1")
+                    self.assertIn(release.exporter.HARNESS_GUIDES[agent], manifest["files"])
+                    self.assertIn(release.exporter.HARNESS_GUIDES[agent], (root / "README.md").read_text())
+                    for page in root.rglob("*.md"):
+                        for link in re.findall(r"\[[^\]]+\]\(([^)]+)\)", page.read_text()):
+                            if "://" in link or link.startswith("#"):
+                                continue
+                            resource = (page.parent / link.split("#", 1)[0]).resolve()
+                            self.assertTrue(resource.is_relative_to(root.resolve()), (page, link))
+                            self.assertTrue(resource.is_file(), (page, link))
                     if agent == "pi":
                         package = json.loads((root / "package.json").read_text())
                         self.assertIn("skills", package["pi"])

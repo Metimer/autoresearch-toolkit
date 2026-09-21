@@ -18,14 +18,12 @@ ROOT = Path(__file__).resolve().parents[1]
 TARGETS = ("aarch64-apple-darwin", "x86_64-apple-darwin",
            "aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu")
 ENGINE_FILES = (
-    "examples/session.json", "schemas/session-v2.schema.json",
-    "docs/RUST_ENGINE.md", "docs/RESULTS.md", "scripts/qualify.py",
+    "examples/session.json", "scripts/qualify.py",
     "examples/demos/README.md",
     *(f"examples/demos/{demo}/{name}" for demo in ("lookup", "memoization")
       for name in ("workload.py", "check.py", "bench.py", "src/mode.txt")),
 )
 PI_FILES = ("index.ts", "transport.ts", "package.json", "package-lock.json", "README.md")
-COMMON_FILES = ("docs/INSTALL.md", "docs/RELEASE_NOTES.md")
 
 
 def run(args, cwd=ROOT):
@@ -141,7 +139,7 @@ def build(profile, agent, output, target=None, pi=False, offline=False):
         flags = ["--locked", "--target", target] + (["--offline"] if offline else [])
         subprocess.run(["cargo", "build", "--release", "-p", "autoresearch-cli", *flags], cwd=ROOT, check=True)
         metadata = json.loads(run(["cargo", "metadata", "--format-version", "1", "--locked", "--filter-platform", target, *(["--offline"] if offline else [])]))
-    resources = (*COMMON_FILES, *(ENGINE_FILES if metadata else ()),
+    resources = (*(ENGINE_FILES if metadata else ()),
                  *(f"adapters/pi/{name}" for name in PI_FILES if pi),
                  *(("scripts/qualify_pi.mjs",) if pi else ()))
     for name in resources:
@@ -170,6 +168,8 @@ def build(profile, agent, output, target=None, pi=False, offline=False):
         (root / "README.md").write_text(
             f"# Autoresearch Toolkit {version}\n\nProfile: **{profile}**. Agent: **{agent}**. "
             f"Target: **{target or 'portable'}**. Pi engine adapter: **{'included' if pi else 'not included'}**.\n\n"
+            f"Start with the [complete {agent} guide]({exporter.HARNESS_GUIDES[agent]}) and "
+            "[shared agent workflow](docs/HARNESS_WORKFLOW.md).\n\n"
             "See [installation and compatibility](docs/INSTALL.md) and [candidate release notes](docs/RELEASE_NOTES.md). "
             "This archive is an unpublished release candidate, not a stable release.\n\n"
             "The skills are in `skills/`. Engine profiles also include `bin/autoresearch`, the engine guides, "

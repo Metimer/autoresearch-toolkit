@@ -14,6 +14,7 @@ MANIFESTS = {
     "pi": "package.json",
     "generic": "plugin.json",
 }
+HARNESS_GUIDES = {agent: f"docs/harnesses/{agent}/README.md" for agent in MANIFESTS}
 # Explicit distribution inventory. New resources must be reviewed and added here;
 # an unrelated file placed in a skill must never silently enter a release.
 # Both skill modes are shipped; the separately installed Rust binary is excluded.
@@ -21,6 +22,13 @@ PORTABLE_FILES = (
     "README.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
+    "docs/HARNESS_WORKFLOW.md",
+    "docs/INSTALL.md",
+    "docs/RELEASE_NOTES.md",
+    "docs/RUST_ENGINE.md",
+    "docs/RESULTS.md",
+    "schemas/session-v2.schema.json",
+    "adapters/pi/README.md",
     "skills/autoresearch-scout/SKILL.md",
     "skills/autoresearch-scout/agents/openai.yaml",
     "skills/autoresearch-scout/assets/prompt.md",
@@ -58,7 +66,7 @@ def export(agent: str, destination: Path) -> Path:
         raise FileExistsError(f"refusing to overwrite {destination}")
     if destination.resolve().is_relative_to((ROOT / "skills").resolve()):
         raise ValueError("destination must be outside the source skills directory")
-    resources = [validate_resource(name) for name in (*PORTABLE_FILES, manifest)]
+    resources = [validate_resource(name) for name in (*PORTABLE_FILES, manifest, HARNESS_GUIDES[agent])]
     destination.mkdir(parents=True, exist_ok=False)
     # Only maintained portable resources; no originals, sessions or local config.
     # If I/O fails, leave partial output for inspection, never recursively delete.
@@ -66,6 +74,19 @@ def export(agent: str, destination: Path) -> Path:
         target = destination / source.relative_to(ROOT)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+    (destination / "README.md").write_text(
+        f"# Autoresearch Toolkit for {agent}\n\n"
+        f"Start with the [complete {agent} guide]({HARNESS_GUIDES[agent]}), then follow the "
+        "[shared workflow](docs/HARNESS_WORKFLOW.md) for engine setup, baseline preparation, "
+        "bounded optimization, stopping and recovery.\n\n"
+        "This skills-only folder contains both complete skills, their resources, the selected "
+        "host manifest and documentation. It contains no Rust binary, extension code or build tooling. "
+        "The Pi adapter reference is documentation only. Rust mode needs an independently installed "
+        "engine; portable measurements need Git and Python 3.10+.\n\n"
+        "See [installation and compatibility](docs/INSTALL.md) and [candidate release notes](docs/RELEASE_NOTES.md). "
+        "Exporting does not change agent settings or install dependencies. Keep the "
+        "[MIT license](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).\n"
+    )
     return destination
 
 

@@ -144,7 +144,7 @@ class MeasurementTests(unittest.TestCase):
 class ExportTests(unittest.TestCase):
     def fixture(self, base):
         source = base / "source"
-        for name in (*exporter.PORTABLE_FILES, *exporter.MANIFESTS.values()):
+        for name in (*exporter.PORTABLE_FILES, *exporter.MANIFESTS.values(), *exporter.HARNESS_GUIDES.values()):
             target = source / name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / name, target)
@@ -170,7 +170,7 @@ class ExportTests(unittest.TestCase):
                         target = exporter.export(agent, base / agent / "autoresearch-toolkit")
                         files = {str(p.relative_to(target)) for p in target.rglob("*")
                                  if p.is_file()}
-                        self.assertEqual(files, {*exporter.PORTABLE_FILES, manifest})
+                        self.assertEqual(files, {*exporter.PORTABLE_FILES, manifest, exporter.HARNESS_GUIDES[agent]})
                         self.assertTrue(all(b"SYNTHETIC_PRIVATE_SENTINEL" not in
                                             (target / name).read_bytes() for name in files))
 
@@ -217,6 +217,7 @@ class ExportTests(unittest.TestCase):
             "skills/autoresearch-scout", "skills/autoresearch-scout/scripts",
             "skills/autoresearch-scout/scripts/measure.py",
             *exporter.MANIFESTS.values(),
+            *exporter.HARNESS_GUIDES.values(),
         )
         for name in paths:
             with self.subTest(path=name), tempfile.TemporaryDirectory() as directory:
@@ -228,7 +229,7 @@ class ExportTests(unittest.TestCase):
                 resource.rename(outside)
                 resource.symlink_to(outside, target_is_directory=is_directory)
                 agent = next((a for a, m in exporter.MANIFESTS.items() if m == name),
-                             "codex")
+                             next((a for a, guide in exporter.HARNESS_GUIDES.items() if guide == name), "codex"))
                 target = base / "output/autoresearch-toolkit"
                 with patch.object(exporter, "ROOT", source):
                     with self.assertRaisesRegex(ValueError, "symlinked resource"):
@@ -293,7 +294,7 @@ class ExportTests(unittest.TestCase):
     def test_exported_skill_links_and_engine_template_are_self_contained(self):
         with tempfile.TemporaryDirectory() as directory:
             target = exporter.export("generic", Path(directory) / "autoresearch-toolkit")
-            for page in (target / "skills").rglob("*.md"):
+            for page in target.rglob("*.md"):
                 for link in re.findall(r"\[[^\]]+\]\(([^)]+)\)", page.read_text()):
                     if "://" in link or link.startswith("#"):
                         continue
