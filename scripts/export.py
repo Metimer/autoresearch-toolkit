@@ -76,6 +76,7 @@ def export(agent: str, destination: Path) -> Path:
         shutil.copy2(source, target)
     (destination / "README.md").write_text(
         f"# Autoresearch Toolkit for {agent}\n\n"
+        "Created and maintained by **Metimer**.\n\n"
         f"Start with the [complete {agent} guide]({HARNESS_GUIDES[agent]}), then follow the "
         "[shared workflow](docs/HARNESS_WORKFLOW.md) for engine setup, baseline preparation, "
         "bounded optimization, stopping and recovery.\n\n"

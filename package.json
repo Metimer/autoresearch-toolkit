@@ -3,6 +3,7 @@
   "version": "1.0.0-rc.1",
   "private": true,
   "license": "MIT",
+  "author": "Metimer <metinamerwane@gmail.com>",
   "description": "Portable autoresearch scouting and bounded optimization skills",
   "keywords": [
     "pi-package"

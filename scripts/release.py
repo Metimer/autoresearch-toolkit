@@ -166,7 +166,9 @@ def build(profile, agent, output, target=None, pi=False, offline=False):
             manifest["pi"]["extensions"] = ["./adapters/pi/index.ts"]
             manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
         (root / "README.md").write_text(
-            f"# Autoresearch Toolkit {version}\n\nProfile: **{profile}**. Agent: **{agent}**. "
+            f"# Autoresearch Toolkit {version}\n\n"
+            "Created and maintained by **Metimer**.\n\n"
+            f"Profile: **{profile}**. Agent: **{agent}**. "
             f"Target: **{target or 'portable'}**. Pi engine adapter: **{'included' if pi else 'not included'}**.\n\n"
             f"Start with the [complete {agent} guide]({exporter.HARNESS_GUIDES[agent]}) and "
             "[shared agent workflow](docs/HARNESS_WORKFLOW.md).\n\n"

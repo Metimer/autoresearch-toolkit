@@ -1,5 +1,7 @@
 # Autoresearch Toolkit
 
+Created and maintained by **Metimer**.
+
 A Rust engine and agent skills for measured optimization: establish a baseline,
 test one hypothesis at a time, and keep only verified improvements. The engine
 also runs directly from the CLI without Pi or an LLM.
