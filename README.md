@@ -6,11 +6,12 @@ A Rust engine and agent skills for measured optimization: establish a baseline,
 test one hypothesis at a time, and keep only verified improvements. The engine
 also runs directly from the CLI without Pi or an LLM.
 
-**1.0.0-rc.1** is available as a locally buildable candidate. See the
+**1.0.0** is prepared for stable release qualification. See the
 [installation and compatibility guide](docs/INSTALL.md) and
 [release notes](docs/RELEASE_NOTES.md). The
 [qualification matrix](docs/INSTALL.md#native-target-matrix) links CI results and
-artifacts by source revision. Stable publication is a separate step.
+artifacts by source revision. Builds remain unpublished until a tagged release
+is published; qualification applies to the exact source revision.
 
 The workflow has two stages:
 

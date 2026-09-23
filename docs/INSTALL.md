@@ -1,7 +1,7 @@
-# Candidate installation and compatibility
+# Installation and compatibility
 
-This is **1.0.0-rc.1**, an unpublished candidate. Stable v1 qualification requires
-the full target matrix to pass on the final revision. Downloading, uploading,
+This is **1.0.0**, prepared for stable release qualification and not yet published.
+Qualification requires the full target matrix to pass on the final revision. Downloading, uploading,
 tagging and publishing releases are separate actions; none runs at import time.
 
 ## Select a profile
@@ -87,7 +87,7 @@ follow the Rust session contract; there is no automatic experiment loop.
 | `x86_64-unknown-linux-gnu` | Ubuntu 24.04 x64 | `candidate-x86_64-unknown-linux-gnu` |
 | `x86_64-apple-darwin` | macOS 15 Intel | `candidate-x86_64-apple-darwin` |
 
-Use the [candidate workflow runs](https://github.com/Metimer/autoresearch-toolkit/actions/workflows/candidate.yml?query=branch%3Aqualification%2F1.0.0-rc.1)
+Use the [candidate workflow runs](https://github.com/Metimer/autoresearch-toolkit/actions/workflows/candidate.yml?query=branch%3Arelease%2F1.0.0)
 to inspect results and download the nine artifacts: four native engine/Pi packages
 and five skills packages. Each contains an archive, checksums and qualification
 reports; native packages additionally include the Pi loader report. Match the
@@ -96,7 +96,7 @@ check the archive and manifest hashes against the reports. The engine and Pi
 reports must refer to the same manifest.
 
 Qualification requires both that candidate run and the
-[Checks workflow](https://github.com/Metimer/autoresearch-toolkit/actions/workflows/ci.yml?query=branch%3Aqualification%2F1.0.0-rc.1)
+[Checks workflow](https://github.com/Metimer/autoresearch-toolkit/actions/workflows/ci.yml?query=branch%3Arelease%2F1.0.0)
 to succeed for the same source commit. A successful job on an older commit does
 not qualify a newer artifact. CI artifacts are reviewable candidates, not a
 tagged stable release; the workflow does not merge the qualification branch.

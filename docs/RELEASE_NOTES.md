@@ -1,6 +1,18 @@
-# Autoresearch Toolkit 1.0.0-rc.1
+# Autoresearch Toolkit 1.0.0
 
-Candidate prepared for qualification; not a stable release or a published package.
+Prepared for stable release qualification; no tagged release or package has been
+published yet. Created and maintained by Metimer.
+
+The preceding `1.0.0-rc.1` revision
+[`be10550`](https://github.com/Metimer/autoresearch-toolkit/commit/be10550390417f42b77268b8324ca5adbe732872)
+passed all 20 jobs across
+[Checks](https://github.com/Metimer/autoresearch-toolkit/actions/runs/35829790153)
+and [Candidate packages](https://github.com/Metimer/autoresearch-toolkit/actions/runs/35829790064).
+All nine archives were independently checked for source revision, clean-source
+status, inventories, checksums, qualification reports and project credit.
+Version 1.0.0 aligns the engine, Pi adapter and all five host manifests; the Pi
+adapter requires the matching 1.0.0 engine. The final 1.0.0 revision must pass its
+own qualification before publication.
 
 The Rust engine owns immutable contracts, independent source snapshots, scoped
 candidates, supervised commands, shared budgets, measurement qualification and

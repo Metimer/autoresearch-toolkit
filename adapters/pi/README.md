@@ -5,7 +5,7 @@ engine session; Rust owns execution, budgets, cancellation, evidence and verdict
 The adapter does not start an autonomous loop or resume work on session events.
 
 Compatibility is pinned to **Pi `0.85.1`**, **Node.js 24**, and the Toolkit
-**`1.0.0-rc.1`** CLI with JSON envelope version 1, Pi support and hook protocol 1.
+**`1.0.0`** CLI with JSON envelope version 1, Pi support and hook protocol 1.
 The lockfile records the tested dependency graph. Local acceptance used macOS,
 Node.js 24.20.0 and Rust 1.81; Linux/macOS CI is configured separately.
 

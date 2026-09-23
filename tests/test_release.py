@@ -28,7 +28,7 @@ class ReleaseTests(unittest.TestCase):
                     self.assertFalse(manifest["pi_adapter"])
                     self.assertNotIn("bin/autoresearch", manifest["files"])
                     self.assertFalse(any(name.startswith(("originals/", ".auto/", "node_modules/")) for name in manifest["files"]))
-                    self.assertEqual(manifest["version"], "1.0.0-rc.1")
+                    self.assertEqual(manifest["version"], "1.0.0")
                     self.assertIn(release.exporter.HARNESS_GUIDES[agent], manifest["files"])
                     self.assertIn(release.exporter.HARNESS_GUIDES[agent], (root / "README.md").read_text())
                     for page in root.rglob("*.md"):

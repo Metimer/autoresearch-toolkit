@@ -7,7 +7,7 @@ budgets, complete prompts, result interpretation and recovery.
 ## Compatibility and profiles
 
 The extension is pinned to **Pi 0.85.1**, **Node.js 24**, and Toolkit
-**1.0.0-rc.1**. Its real loader, engine negotiation, workflow and cancellation
+**1.0.0**. Its real loader, engine negotiation, workflow and cancellation
 have integration coverage; packaged loading was qualified on four native targets.
 The skills-only profile registers no engine extension. Neither profile is an
 npm registry release; root packages remain private.

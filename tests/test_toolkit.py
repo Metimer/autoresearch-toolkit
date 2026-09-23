@@ -270,7 +270,7 @@ class ExportTests(unittest.TestCase):
                     exporter.export(agent, target)
                     data = json.loads((target / manifest).read_text())
                     self.assertEqual(data["name"], target.name)
-                    self.assertEqual(data["version"], "1.0.0-rc.1")
+                    self.assertEqual(data["version"], "1.0.0")
                     self.assertFalse((target / "originals").exists())
                     self.assertFalse((target / ".auto").exists())
                     self.assertEqual((target / "LICENSE").read_bytes(),

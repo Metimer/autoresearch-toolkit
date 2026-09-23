@@ -43,8 +43,8 @@ export default function autoresearch(pi: ExtensionAPI) {
     if (!compatible) {
       const doctor = await client.run(["doctor"], signal);
       const capabilities = object(doctor.capabilities);
-      if (doctor.version !== "1.0.0-rc.1" || capabilities.run_experiments !== true || capabilities.inspect_evaluations !== true || capabilities.pi_adapter !== true || capabilities.hook_protocol_version !== 1) {
-        throw new Error("This adapter requires the 1.0.0-rc.1 engine with execution and inspection capabilities.");
+      if (doctor.version !== "1.0.0" || capabilities.run_experiments !== true || capabilities.inspect_evaluations !== true || capabilities.pi_adapter !== true || capabilities.hook_protocol_version !== 1) {
+        throw new Error("This adapter requires the 1.0.0 engine with execution and inspection capabilities.");
       }
       compatible = true;
     }

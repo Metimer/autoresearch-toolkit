@@ -4,8 +4,10 @@ Statut : lots 0–10 implémentés pour une exécution locale de confiance sur P
 Supervision, qualification, comparaisons confirmées et promotion atomique sont
 disponibles et intégrés aux skills. Import historique, reprise contrôlée, adaptateur
 Pi, mémoire et bundles de résultats disponibles. Le lot 11 dispose des archives
-et de la qualification locale de la candidate `1.0.0-rc.1` ; la branche distante
-`qualification/1.0.0-rc.1` exécute la matrice complète. Les résultats et artefacts
+et de la qualification complète de la candidate `1.0.0-rc.1` à la révision
+`be10550` : 20 jobs CI réussis et neuf archives vérifiées. La branche
+`release/1.0.0` prépare la version stable et doit qualifier sa propre révision.
+Les résultats et artefacts
 par révision sont accessibles depuis `INSTALL.md`. Les limites
 d’isolation, de quotas et de preuve sont détaillées dans `RUST_ENGINE.md`.
 Référence de départ : commit `130f305`, version du toolkit `0.1.0`.
