@@ -20,10 +20,13 @@ HARNESS_GUIDES = {agent: f"docs/harnesses/{agent}/README.md" for agent in MANIFE
 # Both skill modes are shipped; the separately installed Rust binary is excluded.
 PORTABLE_FILES = (
     "README.md",
+    "ultramarine.png",
+    "ultramarine_wback.png",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
     "docs/HARNESS_WORKFLOW.md",
     "docs/INSTALL.md",
+    "docs/PI_PACKAGE.md",
     "docs/RELEASE_NOTES.md",
     "docs/RUST_ENGINE.md",
     "docs/RESULTS.md",

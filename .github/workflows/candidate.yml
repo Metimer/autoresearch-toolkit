@@ -9,6 +9,42 @@ permissions:
   contents: read
 
 jobs:
+  npm:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: rustup toolchain install 1.81.0 --profile minimal
+      - run: rustup default 1.81.0
+      - run: cargo build --workspace --locked
+      - run: npm --prefix adapters/pi ci --ignore-scripts --no-audit --no-fund
+      - run: npm --prefix adapters/pi run check
+      - name: Build the public Pi tarball from clean sources
+        run: python3 scripts/package_pi.py build --output dist/npm --require-clean
+      - name: Qualify the extracted tarball with an independent Pi host
+        run: python3 scripts/package_pi.py check --archive dist/npm/*.tgz --output dist/npm/qualification.json --require-clean
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-npm-${{ matrix.os }}
+          path: |
+            dist/npm/*.tgz
+            dist/npm/SHA256SUMS
+            dist/npm/qualification.json
+          if-no-files-found: error
+
   native:
     strategy:
       fail-fast: false

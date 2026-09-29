@@ -1,6 +1,11 @@
-# Autoresearch Toolkit
+# Ultramarine
 
-Created and maintained by **Metimer**.
+<p align="center">
+  <img src="ultramarine_wback.png" alt="Ultramarine — a blue snake forming an open loop" width="200" height="200">
+</p>
+
+Created and maintained by **Metimer**. Built on the Autoresearch Toolkit engine;
+the executable, tools and skills retain `autoresearch` names for compatibility.
 
 A Rust engine and agent skills for measured optimization: establish a baseline,
 test one hypothesis at a time, and keep only verified improvements. The engine
@@ -90,6 +95,30 @@ provides engine selection, complete prompts, stop/resume and result inspection.
 Each export includes its selected guide and the shared documentation.
 
 ## Export a bundle
+
+### Pi npm package
+
+The public distribution is **`@metimer/ultramarine`**: one Pi extension and two
+complete skills, with the Rust engine installed separately. It is prepared for
+publication; the source manifests remain private. See the
+[Pi package guide](docs/PI_PACKAGE.md) and the
+[publication checklist](docs/PUBLISHING.md).
+
+After installing the adapter development dependencies and building the engine:
+
+```sh
+python3 scripts/package_pi.py build --output dist/npm
+python3 scripts/package_pi.py check \
+  --archive dist/npm/metimer-ultramarine-1.0.0.tgz \
+  --output dist/npm/qualification.json
+```
+
+The builder copies reviewed resources, checks packaged links and inventories,
+and never publishes. The check installs the tarball offline, loads it through Pi and runs
+the engine workflow and cancellation suite outside the checkout, without a model
+request. Use `--require-clean` on both commands for final release qualification.
+
+### Skills and native engine archives
 
 Build a versioned archive with an explicit profile:
 

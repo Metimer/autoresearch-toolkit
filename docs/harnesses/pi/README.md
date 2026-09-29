@@ -9,8 +9,9 @@ budgets, complete prompts, result interpretation and recovery.
 The extension is pinned to **Pi 0.85.1**, **Node.js 24**, and Toolkit
 **1.0.0**. Its real loader, engine negotiation, workflow and cancellation
 have integration coverage; packaged loading was qualified on four native targets.
-The skills-only profile registers no engine extension. Neither profile is an
-npm registry release; root packages remain private.
+The skills-only profile registers no engine extension. These archive profiles
+remain private. The separate **Ultramarine** npm distribution combines the
+extension and skills; see the [npm installation guide](../../PI_PACKAGE.md).
 On 2026-09-21, Pi's native skill loader also discovered both skills from a fresh
 folder export with no diagnostics or provider request.
 

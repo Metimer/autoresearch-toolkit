@@ -1,4 +1,4 @@
-# Autoresearch Toolkit for Pi
+# Ultramarine Pi adapter
 
 An optional TypeScript adapter for the Rust engine. It attaches Pi to one explicit
 engine session; Rust owns execution, budgets, cancellation, evidence and verdicts.
@@ -45,8 +45,10 @@ different session automatically. See the upstream
 The root package and exported portable bundles continue to load skills only.
 An engine archive built with `--agent pi --pi-adapter` includes this adapter and
 registers it in the packaged manifest. See the
-[candidate installation guide](../../docs/INSTALL.md). npm dependencies remain
-separately installed; registry publication is not enabled.
+[candidate installation guide](../../docs/INSTALL.md). Source/archive dependencies
+remain separately installed. The dedicated `@metimer/ultramarine` npm distribution
+includes the extension and both skills, with Pi-provided modules declared as peers.
+See [npm installation](../../docs/PI_PACKAGE.md); publication is a separate step.
 
 ## Tools and stopping
 

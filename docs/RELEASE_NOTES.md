@@ -11,8 +11,19 @@ and [Candidate packages](https://github.com/Metimer/autoresearch-toolkit/actions
 All nine archives were independently checked for source revision, clean-source
 status, inventories, checksums, qualification reports and project credit.
 Version 1.0.0 aligns the engine, Pi adapter and all five host manifests; the Pi
-adapter requires the matching 1.0.0 engine. The final 1.0.0 revision must pass its
-own qualification before publication.
+adapter requires the matching 1.0.0 engine. Commit
+`581f0d372c8a7c990f4276fec01705cf965654db` subsequently passed
+[Checks](https://github.com/Metimer/autoresearch-toolkit/actions/runs/35830541737)
+and [Candidate packages](https://github.com/Metimer/autoresearch-toolkit/actions/runs/35830541749).
+The Ultramarine packaging changes require fresh qualification on their final
+commit before publication.
+
+The public Pi package is named **Ultramarine**, distributed as
+`@metimer/ultramarine`. It contains the extension and both complete skills; the
+Rust engine remains a separate native download. Source and archive manifests
+remain private. `scripts/package_pi.py` creates the public npm manifest,
+inventories its contents and tests the actual tarball outside the checkout.
+Existing commands, engine contracts and session paths are retained.
 
 The Rust engine owns immutable contracts, independent source snapshots, scoped
 candidates, supervised commands, shared budgets, measurement qualification and

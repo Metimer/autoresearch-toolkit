@@ -9,8 +9,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { discoverAndLoadExtensions, ExtensionRunner, SessionManager } from "@earendil-works/pi-coding-agent";
 
 const repository = fileURLToPath(new URL("../../../", import.meta.url));
-const binary = resolve(repository, "target/debug/autoresearch");
-const extension = fileURLToPath(new URL("../index.ts", import.meta.url));
+const binary = resolve(process.env.ULTRAMARINE_TEST_ENGINE ?? resolve(repository, "target/debug/autoresearch"));
+const extension = process.env.ULTRAMARINE_TEST_EXTENSION ?? fileURLToPath(new URL("../index.ts", import.meta.url));
 const template = resolve(repository, "examples/session.json");
 
 function fixture(t, blockedHook = false) {

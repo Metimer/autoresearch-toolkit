@@ -20,7 +20,7 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def unpack(archive, destination):
+def unpack(archive, destination, root_name="autoresearch-toolkit"):
     total = 0
     names = set()
     with tarfile.open(archive, "r:gz") as tar:
@@ -28,7 +28,7 @@ def unpack(archive, destination):
             path = PurePosixPath(member.name)
             total += member.size
             if (not member.isfile() or path.is_absolute() or ".." in path.parts
-                    or not path.parts or path.parts[0] != "autoresearch-toolkit"
+                    or not path.parts or path.parts[0] != root_name
                     or member.name in names or len(names) >= 16384 or total > 512 * 1024 * 1024
                     or member.mode not in (0o644, 0o755)):
                 raise ValueError("unsafe, duplicate or oversized archive member")
@@ -38,7 +38,7 @@ def unpack(archive, destination):
             with tar.extractfile(member) as source, target.open("xb") as output:
                 shutil.copyfileobj(source, output)
             target.chmod(member.mode)
-    return destination / "autoresearch-toolkit"
+    return destination / root_name
 
 
 def verify(root):
@@ -46,7 +46,7 @@ def verify(root):
     if manifest_path.is_symlink():
         raise ValueError("linked package manifest")
     manifest = json.loads(manifest_path.read_text())
-    if manifest["schema_version"] != 1 or manifest["profile"] not in ("skills", "engine"):
+    if manifest["schema_version"] != 1 or manifest["profile"] not in ("skills", "engine", "pi-npm"):
         raise ValueError("unsupported package manifest")
     actual = set()
     for path in root.rglob("*"):

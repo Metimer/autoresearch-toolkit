@@ -1,0 +1,27 @@
+{
+  "name": "@metimer/ultramarine",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Ultramarine: bounded optimization experiments for Pi, with a Rust engine and portable research skills",
+  "license": "MIT",
+  "author": "Metimer <metinamerwane@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Metimer/autoresearch-toolkit.git"
+  },
+  "homepage": "https://github.com/Metimer/autoresearch-toolkit#readme",
+  "bugs": { "url": "https://github.com/Metimer/autoresearch-toolkit/issues" },
+  "keywords": ["pi-package", "ultramarine", "autoresearch", "optimization", "benchmark"],
+  "engines": { "node": ">=24 <25" },
+  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "image": "https://raw.githubusercontent.com/Metimer/autoresearch-toolkit/v1.0.0/ultramarine.png",
+    "extensions": ["./adapters/pi/index.ts"],
+    "skills": ["./skills"]
+  }
+}
